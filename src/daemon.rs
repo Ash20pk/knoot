@@ -932,12 +932,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             // The mirror arrives on the same socket as everything else, so a
             // cold daemon has to be given the same beat `who` is given.
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            let (last_write, users) = {
-                let v = rc.view.lock().unwrap();
-                let users: HashMap<String, String> =
-                    v.sessions.iter().map(|(k, s)| (k.clone(), s.user.clone())).collect();
-                (v.last_write.clone(), users)
-            };
+            let (last_write, users) = write_context(&rc);
             let lookup =
                 |s: &str| users.get(s).cloned().unwrap_or_else(|| s.to_string());
             let root = std::path::Path::new(&repo_root);
