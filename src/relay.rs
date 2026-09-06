@@ -1222,8 +1222,15 @@ async fn terms_handler(
 
 async fn terms_body(app: Arc<App>) -> impl IntoResponse {
     match &app.terms {
-        Some(t) => Json(serde_json::json!({ "dir": t.dir, "agents": t.names() })),
-        None => Json(serde_json::json!({ "dir": null, "agents": [] })),
+        Some(t) => {
+            // The repo id, so the page's activity pane can subscribe to the
+            // event stream immediately — `/api/repos` only lists repos that
+            // already have events, which a fresh lab does not, so the pane
+            // would otherwise never connect.
+            let repo = crate::config::RepoConfig::load(std::path::Path::new(&t.dir)).map(|c| c.repo);
+            Json(serde_json::json!({ "dir": t.dir, "agents": t.names(), "repo": repo }))
+        }
+        None => Json(serde_json::json!({ "dir": null, "agents": [], "repo": null })),
     }
 }
 

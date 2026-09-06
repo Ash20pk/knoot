@@ -155,10 +155,13 @@ async function boot() {
     ($('run') as HTMLButtonElement).addEventListener('click', runScenario);
   }
 
-  const repos = await fetch(withTok('/api/repos')).then((r) => r.json()).catch(() => []);
-  repo = repos[0];
+  // The relay tells us the lab's repo id directly, so the activity pane can
+  // subscribe before any event exists. `/api/repos` is the fallback for a
+  // relay not hosting a lab.
+  repo = info.repo || (await fetch(withTok('/api/repos')).then((r) => r.json()).catch(() => []))[0] || null;
   $('repo').textContent = info.dir ? info.dir : (repo || '');
   if (repo) { await history(); connect(); }
+  else $('feed').innerHTML = '<div class="empty">No repo yet — start the relay with <code>--lab-dir</code>.</div>';
 }
 
 async function history() {
