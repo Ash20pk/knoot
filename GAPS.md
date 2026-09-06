@@ -302,6 +302,36 @@ and claims, not a declared plan)"* rather than a guess in a plan's voice.
 capable model says what the *approach* is and what has been settled, which no
 intent sentence can carry.
 
+*Live, 6 September 2026 — real sessions, not the lab.* Two headless Claude
+Code sessions on one scratch repo, against a real relay and daemon, with two
+facts planted: money is integer cents (`src/billing.js`), and auth functions
+never throw but return `{ok:false, code}` (`src/auth.js`). The seed files
+followed neither.
+
+- **Memory changed what three real sessions wrote.** Sonnet, refactoring
+  `auth.js` in ten edits: every function returned `{ok, code}`, and its closing
+  sentence said *"per the team's established error convention"*. Haiku, adding
+  `rateLimit()` later: *"follows the existing error pattern — returns
+  `{ok:false, code}`"*. Neither prompt mentioned the convention; nothing in the
+  file exhibited it. Then the negative: Haiku on `billing.js`, with the cents
+  fact confirmed on its brief, wrote `subtotal * (1 - discountRate)` in floats.
+  Three of four, again — and the miss is the same model the lab's miss was.
+- **Awareness prevented the collision before the lock had to.** Haiku, asked to
+  edit `auth.js` twelve seconds into Sonnet's refactor, did not attempt the
+  edit: *"ash is actively adding functions… rather than create edit conflicts,
+  I'd recommend waiting."* The log shows no `claim_denied`, because there was no
+  attempt. This is the outcome the lab runs kept producing and the reason
+  `claim_denied` stays at zero: the block is the backstop, the brief is the
+  product. The one denial that did fire was a Codex-shaped claim against a
+  real Claude Code session, which re-planned on the brief: *"the file is
+  currently locked — I can either wait, or coordinate via knoot msg"*.
+- **Two bugs no test had.** A stale flag named a session id where a person
+  belongs, because the writer's session had ended and been pruned — on two
+  code paths. Fixed; the view now remembers every author it has seen. And
+  Codex's npm and Homebrew installs both failed to download on this machine,
+  so the live Codex arm is still owed: thirteen tests drive its exact payload
+  shapes, and a real session has not yet been run.
+
 *One thing that is not a bug.* Every claim is attributed to
 `lab@knoot.local`, because four agents on one machine share one device key and
 authorship comes from the key. That is phase 1 working as designed — one
