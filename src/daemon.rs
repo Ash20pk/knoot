@@ -1621,8 +1621,10 @@ fn write_context(
     rc: &Arc<RepoConn>,
 ) -> (HashMap<String, (String, Ts)>, HashMap<String, String>) {
     let v = rc.view.lock().unwrap();
-    let users: HashMap<String, String> =
-        v.sessions.iter().map(|(k, s)| (k.clone(), s.user.clone())).collect();
+    // Live sessions first, then everyone this view has seen write: the
+    // session behind a stale flag has usually ended by the time it matters.
+    let mut users: HashMap<String, String> = v.authors.clone();
+    users.extend(v.sessions.iter().map(|(k, s)| (k.clone(), s.user.clone())));
     (v.last_write.clone(), users)
 }
 

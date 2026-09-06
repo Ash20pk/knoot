@@ -617,6 +617,12 @@ pub struct View {
     /// authorship — the tree is shared — so it consults this instead of
     /// assuming every change inside its window was its own.
     pub last_write: HashMap<String, (String, Ts)>,
+    /// Every session this view has ever seen write or claim, and the person
+    /// behind it. Never pruned: a session that ended is exactly the one a
+    /// stale flag most often has to name — "priya changed this since" is
+    /// worthless as "d7317d40-… changed this since", which is what a lookup
+    /// through live `sessions` produced once the writer had gone.
+    pub authors: HashMap<String, String>,
     /// Recent writes, newest last, within `WRITE_WINDOW_MS`. Feeds the
     /// "changed under you since your last turn" context an agent receives
     /// without asking for it.
@@ -791,6 +797,7 @@ impl View {
     pub fn apply(&mut self, ev: &Event) {
         match ev {
             Event::SessionStarted { session, user, branch, ts } => {
+                self.authors.insert(session.clone(), user.clone());
                 self.sessions.insert(
                     session.clone(),
                     SessionInfo {
@@ -850,6 +857,9 @@ impl View {
             }
             Event::FileWritten { session, user, path, ts } => {
                 self.last_write.insert(path.clone(), (session.clone(), *ts));
+                if !user.is_empty() {
+                    self.authors.insert(session.clone(), user.clone());
+                }
                 // Authorship comes off the event now, so a peer can be told
                 // who moved the file without a join back through presence.
                 let user = if user.is_empty() {
@@ -1517,6 +1527,17 @@ mod tests {
         }
         assert_eq!(v.claims.len(), 1, "same session+path must renew, not duplicate");
         assert_eq!(v.claims[0].lease_until, second);
+    }
+
+    /// The person behind a write outlives the session that made it. A stale
+    /// flag names who changed the file; the writer has usually finished.
+    #[test]
+    fn a_writers_name_survives_their_session_ending() {
+        let mut v = View::default();
+        v.apply(&Event::FileWritten { session: "s1".into(), user: "priya".into(), path: "a.rs".into(), ts: now_ms() });
+        v.apply(&Event::SessionEnded { session: "s1".into(), ts: now_ms() });
+        assert!(v.sessions.get("s1").is_none());
+        assert_eq!(v.authors.get("s1").map(String::as_str), Some("priya"));
     }
 
     #[test]

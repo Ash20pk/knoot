@@ -334,6 +334,8 @@ async fn mail_reaches_a_codex_session_when_it_tries_to_stop() {
         .output()
         .unwrap();
     assert!(sent.status.success());
+    // A message travels through the relay like every other event.
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
     let mut stop = envelope(&root, "cx-priya", "Stop");
     stop["stop_hook_active"] = json!(false);

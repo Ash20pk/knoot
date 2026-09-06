@@ -711,6 +711,39 @@ async fn a_session_that_replans_replaces_its_own_context() {
     assert!(!brief.contains("patch it in place"), "and only the current one:\n{brief}");
 }
 
+/// The stale flag names a *person*. The session that wrote the file has
+/// usually ended by the time the flag is read, and a brief that said
+/// "d7317d40-… changed this since" was the bug a live run found.
+#[tokio::test]
+async fn a_stale_flag_names_the_person_after_their_session_has_ended() {
+    let (c, root, _) = repo("stalename").await;
+    std::fs::write(root.join("src/money.rs"), "v1\n").unwrap();
+    joins(&c.sock, &root, "s-ash", "ash");
+    remember(&c.sock, &root, &["--name", "money", "--path", "src/money.rs", "cents, never floats"]);
+    settle().await;
+
+    joins(&c.sock, &root, "s-priya", "priya");
+    pre_write(&c.sock, &root, "s-priya", "priya", "src/money.rs");
+    std::fs::write(root.join("src/money.rs"), "v2\n").unwrap();
+    hook_as(
+        &c.sock,
+        json!({ "hook_event_name": "PostToolUse", "session_id": "s-priya", "cwd": root.to_string_lossy(),
+                "tool_name": "Edit", "tool_input": { "file_path": format!("{}/src/money.rs", root.to_string_lossy()) } }),
+        "priya",
+    );
+    ends(&c.sock, &root, "s-priya", "priya");
+    settle().await;
+
+    reads(&c.sock, &root, "s-ash", "ash", "src/money.rs");
+    let brief = prompt(&c.sock, &root, "s-ash", "ash", "go");
+    assert!(brief.contains("possibly stale"), "the flag:\n{brief}");
+    // Authorship comes from the device key, and every session in this
+    // harness shares one — so the person is the key's email, whichever
+    // KNOOT_USER the session ran under. What matters is that it is a person.
+    assert!(brief.contains("@example.com changed src/money.rs since"), "names the person:\n{brief}");
+    assert!(!brief.contains("s-priya changed"), "not the session id:\n{brief}");
+}
+
 /// Derived knowledge is *dropped* when its ground moves, not flagged. That is
 /// the whole difference from a fact: a fact was written on purpose and who
 /// changed it is what its reader needs; a cache entry past its files is
