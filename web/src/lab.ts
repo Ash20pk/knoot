@@ -93,21 +93,25 @@ const cc = (prompt: string) =>
 
 
 const SCENARIO: { at: number; agent: number; note: string; line: string }[] = [
-  // Every pane runs a real `claude -p` session. ash and priya are pointed at
-  // the SAME file at the same moment: a genuine race. Whichever claims first
-  // holds it; the other's edit meets the live arbiter and it re-plans — which
-  // you watch happen in its own pane, and which the activity log records.
+  // A real, interdependent project: an invoice endpoint. Three of the four
+  // agents must add a shape to the SHARED src/types.js — and they do it FIRST,
+  // so the contention shows early: whoever takes types.js holds it, the others
+  // find it held and re-plan. The fourth (the endpoint) runs free.
   {
-    at: 0, agent: 0, note: 'ash takes src/auth.js and starts editing',
-    line: cc('Add SEVEN functions to src/auth.js — logout(), revoke(token), rotateKey(), listSessions(), verifyMfa(user), lockAccount(user) and auditLog(event) — each with a JSDoc block and each as its OWN separate Edit call, pausing to re-read the file between edits. Do not batch them. One sentence to finish.'),
+    at: 0, agent: 0, note: 'ash → src/types.js first (Session), then src/auth.js',
+    line: cc('Invoice service, and be quick. FIRST: add a `Session` typedef comment to the SHARED file src/types.js as a single Edit. If that edit is refused because a teammate holds the file, tell me who holds it and what they are doing, then skip it. THEN add refreshSession(token) to src/auth.js. One sentence to finish.'),
   },
   {
-    at: 16, agent: 1, note: 'priya is sent at the same file — she finds ash holds it, and re-plans',
-    line: cc('Add a rateLimit(user) function to src/auth.js with the Edit tool. If the edit is refused because a teammate is holding the file, tell me who holds it and what they are doing, then stop.'),
+    at: 2, agent: 1, note: 'priya → src/types.js first (Money), then src/billing.js',
+    line: cc('Invoice service, and be quick. FIRST: add a `Money` typedef comment to the SHARED file src/types.js as a single Edit. If that edit is refused because a teammate holds the file, tell me who holds it, then skip it. THEN add discount(items, pct) to src/billing.js. One sentence to finish.'),
   },
   {
-    at: 3, agent: 2, note: 'sam works src/billing.js in parallel — no collision',
-    line: cc('Add a discount(items, pct) function to src/billing.js and use it in invoiceTotal. Edit the file directly, then stop.'),
+    at: 4, agent: 3, note: 'jordan → src/types.js first (Invoice), then test.js',
+    line: cc('Invoice service, and be quick. FIRST: add an `Invoice` typedef comment to the SHARED file src/types.js as a single Edit. If that edit is refused because a teammate holds the file, tell me who holds it, then skip it. THEN write a small test.js with a node assert. One sentence to finish.'),
+  },
+  {
+    at: 3, agent: 2, note: 'sam → the endpoint in src/api.js, in parallel — no collision',
+    line: cc('Invoice service, and be quick. In src/api.js wire POST /invoice: validate the session token, compute a total, return { total, currency }; 401 if unauthenticated. Edit src/api.js directly. One sentence to finish.'),
   },
 ];
 
@@ -220,36 +224,46 @@ function apply(e: any, live: boolean) {
   feed(e, live);
 }
 
+// type -> [readable label, css class]. The label is what a person reads; the
+// class only colours it. Showing the raw event type here was the broken text.
 const KIND: Record<string, [string, string]> = {
-  session_started: ['joined', 'session_started'], intent_declared: ['intent', 'intent_declared'],
-  claim_acquired: ['claim', 'claim_acquired'], claim_released: ['released', 'claim_released'],
-  path_freed: ['freed', 'path_freed'], message: ['freed', 'message'],
-  file_written: ['wrote', 'file_written'], claim_denied: ['blocked', 'claim_denied'],
-  cross_branch_overlap: ['merge', 'cross_branch_overlap'],
-  path_removed: ['deleted', 'path_removed'], stale_read: ['stale', 'stale_read'],
-  create_collision: ['create', 'create_collision'],
-  ungated_write: ['ungated', 'ungated_write'], session_ended: ['left', 'session_ended'],
+  session_started: ['joined', 'joined'], intent_declared: ['plans to', 'intent'],
+  claim_acquired: ['took', 'claim'], claim_released: ['released', 'released'],
+  path_freed: ['freed', 'freed'], message: ['said', 'freed'],
+  file_written: ['wrote', 'wrote'], claim_denied: ['BLOCKED', 'blocked'],
+  cross_branch_overlap: ['merges', 'merge'],
+  path_removed: ['deleted', 'deleted'], stale_read: ['stale', 'stale'],
+  create_collision: ['collides', 'create'],
+  ungated_write: ['overwrote', 'ungated'], session_ended: ['left', 'left'],
 };
 
+const clip = (s: string, n = 52) => {
+  const one = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return one.length > n ? one.slice(0, n - 1) + '…' : one;
+};
+const base = (p: string) => String(p).split('/').pop() || p;
+
 function feed(e: any, live: boolean) {
-  const [cls, label] = KIND[e.type] || ['intent', e.type];
-  const who = e.user || sessions.get(e.session)?.user || short(e.session);
+  const [label, cls] = KIND[e.type] || [e.type, 'intent'];
+  // Some events carry no user (intent, session end); resolve it from the
+  // session we saw start. Never show a raw session hash where a name belongs.
+  const who = e.user || sessions.get(e.session)?.user || 'someone';
   let detail = '';
-  if (e.type === 'intent_declared') detail = e.text;
-  else if (e.type === 'claim_denied') detail = `${e.path} — held by ${e.holder_user}`;
-  else if (e.type === 'ungated_write') detail = `${e.path} — wrote over ${e.holder_user}`;
-  else if (e.type === 'message') detail = `to ${e.to || 'all'}: ${e.text || ''}`;
-  else if (e.type === 'stale_read') detail = `${e.path} — ${e.peer_user} changed it`;
-  else if (e.type === 'create_collision') detail = `${e.path} — also created by ${e.peer_user}`;
+  if (e.type === 'intent_declared') detail = clip(e.text, 60);
+  else if (e.type === 'claim_denied') detail = `${base(e.path)} — held by ${e.holder_user}`;
+  else if (e.type === 'ungated_write') detail = `${base(e.path)} — over ${e.holder_user}`;
+  else if (e.type === 'message') detail = `${e.to || 'all'}: ${clip(e.text || '', 44)}`;
+  else if (e.type === 'stale_read') detail = `${base(e.path)} — ${e.peer_user} changed it`;
+  else if (e.type === 'create_collision') detail = `${base(e.path)} — also by ${e.peer_user}`;
+  else if (e.type === 'session_started' || e.type === 'session_ended') detail = '';
   else if (e.path) detail = e.path;
-  else if (e.type === 'session_started') detail = e.branch;
 
   const row = document.createElement('div');
   const hot = e.type === 'claim_denied' ? 'blocked' : (e.type === 'ungated_write' ? 'ungated' : '');
   row.className = 'ev ' + hot + (live ? ' new' : '');
   row.innerHTML =
-    `<time>${hhmm(e.ts || Date.now())}</time><span class="u">${esc(who)}</span>` +
-    `<span class="k ${cls}">${label}</span><span class="d">${esc(detail)}</span>`;
+    `<time>${hhmm(e.ts || Date.now())}</time><span class="u" title="${esc(who)}">${esc(who)}</span>` +
+    `<span class="k ${cls}">${esc(label)}</span><span class="d" title="${esc(detail)}">${esc(detail)}</span>`;
   const f = $('feed');
   if (f.querySelector('.empty')) f.innerHTML = '';
   f.appendChild(row);

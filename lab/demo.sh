@@ -19,7 +19,7 @@ BIN="$ROOT/target/release/knoot"
 LAB="${KNOOT_DEMO_DIR:-$HOME/knoot-demo}"
 ADDR="${KNOOT_DEMO_ADDR:-127.0.0.1:7439}"
 URL="ws://${ADDR}/ws"
-AGENTS="ash,priya,sam"
+AGENTS="ash,priya,sam,jordan"
 SHELL_PROG="${KNOOT_DEMO_SHELL:-$(command -v bash || echo /bin/sh)}"
 
 say()  { printf '\033[36m›\033[0m %s\n' "$*"; }
@@ -39,33 +39,63 @@ say "building knoot (release) …"
 
 # ---------------------------------------------------------------- seed repo
 if [[ ! -d "$LAB/.git" ]]; then
-  say "seeding $LAB …"
+  say "seeding $LAB with the invoice-service project …"
   mkdir -p "$LAB/src"
+  cat > "$LAB/GOAL.md" <<'EOF'
+# Invoice service — shared goal
+
+Four agents, one codebase, one objective. You depend on each other's files.
+
+Done when POST /invoice validates a session token, computes a total with tax
+and discount (money in integer cents), and returns { total, currency };
+unauthenticated requests get 401; `node test.js` passes.
+
+Owners (you will still collide — src/types.js is shared by three of you):
+- ash    — sessions in src/auth.js  (+ a Session type in src/types.js)
+- priya  — money in src/billing.js  (+ a Money type in src/types.js)
+- sam     — the endpoint in src/api.js
+- jordan — test.js                  (+ an Invoice type in src/types.js)
+EOF
   cat > "$LAB/src/auth.js" <<'EOF'
 // Authentication and session handling.
 const sessions = new Map();
-
 function login(user) {
   const token = Math.random().toString(36).slice(2);
   sessions.set(token, { user, createdAt: Date.now() });
   return token;
 }
-
-module.exports = { login };
+function validateSession(token) {
+  const s = sessions.get(token);
+  return s || null;
+}
+module.exports = { login, validateSession };
 EOF
   cat > "$LAB/src/billing.js" <<'EOF'
-// Invoice calculation.
+// Invoice calculation. Money is integer cents.
 function lineTotal(item) {
-  return item.qty * item.unitPrice;
+  return item.qtyCents ? item.qty * item.unitPriceCents : item.qty * item.unitPriceCents;
 }
-
 function invoiceTotal(items, taxRate) {
-  const subtotal = items.reduce((sum, i) => sum + lineTotal(i), 0);
-  return subtotal + subtotal * taxRate;
+  const subtotal = items.reduce((sum, i) => sum + i.qty * i.unitPriceCents, 0);
+  return Math.round(subtotal * (1 + taxRate));
 }
-
 module.exports = { lineTotal, invoiceTotal };
 EOF
+  cat > "$LAB/src/api.js" <<'EOF'
+// HTTP surface.
+const { validateSession } = require('./auth');
+const { invoiceTotal } = require('./billing');
+function handler(req, res) {
+  // POST /invoice goes here.
+  res.status(404).end();
+}
+module.exports = { handler };
+EOF
+  cat > "$LAB/src/types.js" <<'EOF'
+// Shared shapes. auth, billing and tests all add to this file — it is the hub.
+module.exports = {};
+EOF
+  echo '// tests go here' > "$LAB/test.js"
   ( cd "$LAB" && git init -q && git add -A && git -c user.email=demo@knoot -c user.name=demo commit -qm seed )
 fi
 
@@ -79,7 +109,10 @@ sleep 0.6
 pgrep -f "knoot daemon" >/dev/null || { "$BIN" daemon >/tmp/knoot-demo-daemon.log 2>&1 & sleep 0.5; }
 
 # Enrol the repo against this relay so the pane agents coordinate through it.
-[[ -f "$LAB/.knoot.toml" ]] || ( cd "$LAB" && "$BIN" init --relay "$URL" >/dev/null )
+if [[ ! -f "$LAB/.knoot.toml" ]]; then
+  ( cd "$LAB" && "$BIN" init --relay "$URL" >/dev/null )
+  printf 'hubs = ["src/types.js"]\n' >> "$LAB/.knoot.toml"
+fi
 
 OPEN="http://${ADDR/0.0.0.0/127.0.0.1}/lab"
 say "lab is up:  $OPEN"
@@ -90,13 +123,13 @@ cat <<EOF
 
   what you are about to see
   -------------------------
-  three REAL agents, one per pane. press ▶ Run the scenario, then:
-  ash    holds src/auth.js and edits it — claims stream in the activity pane
-  priya  is sent at the same file, finds ash holds it, and re-plans
-  sam    edits src/billing.js in parallel — no collision
+  FOUR real agents building one invoice service. press ▶ Run the scenario:
+  ash    sessions (src/auth.js) + a Session type in the shared src/types.js
+  priya  money    (src/billing.js) + a Money type in src/types.js
+  sam     the endpoint (src/api.js), depending on auth + billing
+  jordan tests (test.js) + an Invoice type in src/types.js
 
-  every pane is a live agent log; the activity pane is the real event stream.
-  (a hard red "blocked" is opportunistic: cooperative agents usually re-plan
-  on the brief before the arbiter has to deny anything — that is the point.)
-  stop it all with:  ./lab/demo.sh stop
+  three of them need the SAME file, src/types.js — a declared hub. watch one
+  take it while the others find it held and re-plan; the endpoint runs free.
+  the activity pane is the real event stream. stop with:  ./lab/demo.sh stop
 EOF

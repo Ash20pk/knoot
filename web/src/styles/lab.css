@@ -48,11 +48,11 @@
   aside h2 { margin: 0; height: 34px; padding: 0 14px; font-size: 14px; font-weight: 500; border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 10px; }
   aside h2 .tag.live { color: var(--held); border-color: transparent; }
   #feed { flex: 1; overflow-y: auto; min-height: 0; font-family: var(--mono); font-size: 12px; }
-  .ev { display: grid; grid-template-columns: 58px 66px 74px 1fr; gap: 9px; padding: 5px 14px; border-bottom: 1px solid var(--rule-2); color: var(--text-2); align-items: baseline; font-variant-numeric: tabular-nums; }
+  .ev { display: grid; grid-template-columns: 52px 84px 64px 1fr; gap: 8px; padding: 5px 14px; border-bottom: 1px solid var(--rule-2); color: var(--text-2); align-items: baseline; font-variant-numeric: tabular-nums; }
   .ev time { color: var(--dim); }
   .ev .u { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ev .k { font-weight: 500; }
-  .ev .d { overflow-wrap: anywhere; }
+  .ev .k { font-weight: 500; text-transform: none; white-space: nowrap; }
+  .ev .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ev.new { animation: rowin .5s ease-out; }
   @keyframes rowin { from { background: var(--panel-2); } to { background: transparent; } }
   .k.claim { color: var(--held); } .k.blocked { color: var(--blocked); } .k.ungated, .k.merge, .k.stale, .k.create, .k.deleted { color: var(--warn); }
