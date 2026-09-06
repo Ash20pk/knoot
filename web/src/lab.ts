@@ -1,8 +1,10 @@
 // The browser lab: real Claude Code / shell sessions in ptys, hosted by the
-// relay, with the coordination log beside them. xterm and its fit addon load
-// from a CDN as classic scripts, so they arrive as globals.
-declare const Terminal: any;
-declare const FitAddon: any;
+// relay, with the coordination log beside them. xterm is bundled — not loaded
+// from a CDN — so the lab works offline and cannot break when a CDN moves a
+// package path (which is exactly what happened with cdnjs's xterm 5.3.0).
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
 
 // A hosted relay requires a token; a browser cannot set headers on a
 // WebSocket, so it travels as ?token= — taken from this page's URL and
@@ -55,7 +57,7 @@ function mountTerm(idx: number, name: string) {
     fontSize: 12, lineHeight: 1.15, cursorBlink: true, scrollback: 6000,
     theme: THEME, allowProposedApi: true,
   });
-  const fit = new FitAddon.FitAddon();
+  const fit = new FitAddon();
   term.loadAddon(fit);
   term.open($(`screen-${idx}`));
 

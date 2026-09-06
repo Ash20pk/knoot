@@ -75,6 +75,7 @@ enum Tok {
 /// Heredoc bodies are skipped wholesale. They are data, not shell: a body
 /// containing `(sum, i) => sum + 1` would otherwise lex `=>` as a redirect and
 /// claim a file called `sum`.
+#[allow(unused_assignments)] // the final flush!() resets quoted_word; that write is intentionally dead
 fn lex(cmd: &str) -> (Vec<Tok>, bool) {
     let c: Vec<char> = cmd.chars().collect();
     let mut i = 0;

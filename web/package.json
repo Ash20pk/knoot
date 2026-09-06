@@ -13,6 +13,8 @@
     "vite": "^8.2.2"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.46.1"
+    "@supabase/supabase-js": "^2.46.1",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
   }
 }

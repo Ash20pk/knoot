@@ -90,10 +90,13 @@ cat <<EOF
 
   what you are about to see
   -------------------------
-  ash    starts a long refactor of src/auth.js and holds it
-  priya  is sent at the SAME file ~14s later → BLOCKED, and re-plans
-  sam    works on src/billing.js in parallel → no collision
+  three REAL agents, one per pane. press ▶ Run the scenario, then:
+  ash    holds src/auth.js and edits it — claims stream in the activity pane
+  priya  is sent at the same file, finds ash holds it, and re-plans
+  sam    edits src/billing.js in parallel — no collision
 
-  the activity pane shows every claim, the block, and the release, live.
+  every pane is a live agent log; the activity pane is the real event stream.
+  (a hard red "blocked" is opportunistic: cooperative agents usually re-plan
+  on the brief before the arbiter has to deny anything — that is the point.)
   stop it all with:  ./lab/demo.sh stop
 EOF
