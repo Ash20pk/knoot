@@ -87,32 +87,24 @@ function mountTerm(idx: number, name: string) {
 
 const MODEL = 'haiku';
 const cc = (prompt: string) =>
-  `clear; claude -p --permission-mode acceptEdits --model ${MODEL} ${JSON.stringify(prompt)}\r`;
+  `claude -p --permission-mode acceptEdits --model ${MODEL} ${JSON.stringify(prompt)}\r`;
 
-// The real PreToolUse hook an agent's harness fires before an edit, shown in
-// the pane and answered by the live arbiter. Used for the block beat so it is
-// deterministic; everything it prints — holder, intent, lease — is real.
-const hook = (rel: string) =>
-  `clear; echo "priya's editor is about to edit ${rel} …"; ` +
-  `printf '{"hook_event_name":"PreToolUse","session_id":"priya-demo","cwd":"%s","tool_name":"Edit","tool_input":{"file_path":"%s/${rel}"}}' "$PWD" "$PWD" ` +
-  `| KNOOT_USER=priya knoot hook --agent claude ` +
-  `| python3 -c 'import sys,json;d=json.load(sys.stdin);print("\\nBLOCKED:\\n"+d["hookSpecificOutput"]["permissionDecisionReason"])' 2>/dev/null || echo "(allowed)"\r`;
 
 const SCENARIO: { at: number; agent: number; note: string; line: string }[] = [
+  // Every pane runs a real `claude -p` session. ash and priya are pointed at
+  // the SAME file at the same moment: a genuine race. Whichever claims first
+  // holds it; the other's edit meets the live arbiter and it re-plans — which
+  // you watch happen in its own pane, and which the activity log records.
   {
-    at: 0, agent: 0, note: 'ash starts a long refactor of src/auth.js and holds it',
-    line: cc('You own src/auth.js for a careful refactor. Make TEN separate Edit calls, one at a time — each adds one new exported function with a full JSDoc block: logout, refreshSession, revoke, listSessions, rotateKey, verifyMfa, resetPassword, lockAccount, unlockAccount, auditLog. Do not batch them, and pause to re-read the file between edits. Finish with one sentence.'),
+    at: 0, agent: 0, note: 'ash takes src/auth.js and starts editing',
+    line: cc('Add SEVEN functions to src/auth.js — logout(), revoke(token), rotateKey(), listSessions(), verifyMfa(user), lockAccount(user) and auditLog(event) — each with a JSDoc block and each as its OWN separate Edit call, pausing to re-read the file between edits. Do not batch them. One sentence to finish.'),
   },
   {
-    at: 16, agent: 1, note: "priya's editor asks to edit the SAME file — the arbiter blocks it",
-    // The exact PreToolUse hook an agent's harness sends before an edit. Firing
-    // it directly (rather than via a model that would read the brief and
-    // re-plan first) makes the hard block deterministic for the demo — the
-    // deny, the holder and the lease are all real, straight from the arbiter.
-    line: hook('src/auth.js'),
+    at: 16, agent: 1, note: 'priya is sent at the same file — she finds ash holds it, and re-plans',
+    line: cc('Add a rateLimit(user) function to src/auth.js with the Edit tool. If the edit is refused because a teammate is holding the file, tell me who holds it and what they are doing, then stop.'),
   },
   {
-    at: 34, agent: 2, note: 'sam works on a different file, in parallel — no collision',
+    at: 3, agent: 2, note: 'sam works src/billing.js in parallel — no collision',
     line: cc('Add a discount(items, pct) function to src/billing.js and use it in invoiceTotal. Edit the file directly, then stop.'),
   },
 ];
