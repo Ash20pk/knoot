@@ -15,22 +15,26 @@
 <header>
   <div class="brand">knoot <span>lab</span></div>
   <span class="repo" id="repo"></span>
+  <div class="run">
+    <button id="run" class="btn">▶ Run the scenario</button>
+    <span class="stage" id="stage"></span>
+  </div>
   <a class="link" href="/ops">Operator view</a>
   <div class="counts">
-    <span class="conn" id="dot">connecting</span>
-    <span><b id="s-claims">0</b>claims</span>
+    <span><b id="s-claims">0</b>held</span>
     <span><b id="s-writes">0</b>writes</span>
     <span id="w-blocked"><b id="s-blocked">0</b>blocked</span>
     <span id="w-ungated"><b id="s-ungated">0</b>ungated</span>
+    <span class="conn" id="dot">connecting</span>
   </div>
 </header>
 
 <main>
   <div id="terms"></div>
   <aside>
-    <h2>Ledger <span id="live-tag" class="tag"></span></h2>
-    <div id="feed"><div class="empty">Waiting for activity.</div></div>
-    <div class="hint">Click a terminal to type. Give both agents the same file to see a block.</div>
+    <h2>Activity <span id="live-tag" class="tag"></span></h2>
+    <div id="feed"><div class="empty">Nothing yet. Press <b>Run the scenario</b>, or click a terminal and type.</div></div>
+    <div class="hint" id="hint">Two agents are pointed at the same file on purpose. Watch the second one get <span class="mini blocked">blocked</span> and re-plan.</div>
   </aside>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
