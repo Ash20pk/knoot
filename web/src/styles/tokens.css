@@ -105,7 +105,8 @@ p { margin: 0; }
   display: flex; align-items: center; gap: 10px;
   background: var(--panel); color: var(--panel-text); border-radius: 4px; padding: 10px 12px;
 }
-.cmd-row code { flex: 1; font-size: 13px; white-space: pre; overflow-x: auto; }
+.cmd-row { min-width: 0; }
+.cmd-row code { flex: 1; min-width: 0; font-size: 13px; white-space: pre; overflow-x: auto; }
 .cmd-row code::-webkit-scrollbar { height: 0; }
 .copy {
   flex-shrink: 0; background: transparent; border: 1px solid var(--panel-rule);

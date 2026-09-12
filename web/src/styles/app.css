@@ -55,7 +55,7 @@
 .tabs { display: flex; gap: 4px; margin-left: 14px; }
 .tabs a {
   text-decoration: none; color: var(--panel-dim); font-size: 14.5px;
-  padding: 6px 11px; border-radius: 3px;
+  padding: 6px 11px; border-radius: 3px; white-space: nowrap;
 }
 .tabs a:hover { color: var(--panel-text); }
 .tabs a.on { color: var(--panel-text); background: var(--panel-2); }
@@ -65,7 +65,8 @@
 .topright .who { color: var(--panel-dim); }
 @media (max-width: 900px) {
   .topbar { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 12px; }
-  .tabs { order: 3; width: 100%; margin: 0; overflow-x: auto; }
+  .tabs { order: 3; width: 100%; margin: 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
   .topright .who { display: none; }
 }
 
@@ -84,7 +85,11 @@
 }
 .panel-head h2 { font-size: 14.5px; font-weight: 500; }
 .panel-head .right { margin-left: auto; display: flex; gap: 14px; align-items: center; }
-.panel-body { padding: 16px; }
+.panel-body { padding: 16px; min-width: 0; }
+/* Blocks that carry a command or a key must shrink with the panel; a grid
+   or flex child defaults to its content width and pushes the Copy button
+   off the edge of a phone otherwise. */
+.panel-body > *, .step > *, .step .body, .reveal { min-width: 0; }
 .panel-body > p { color: var(--panel-dim); font-size: 14.5px; }
 
 .counts { display: flex; gap: 20px; font-size: 13.5px; color: var(--panel-dim); font-variant-numeric: tabular-nums; }
@@ -116,6 +121,14 @@ table.rows th:last-child:empty { width: 1%; }
 table.rows td.holds { font-family: var(--mono); font-size: 12.5px; color: var(--held); }
 table.rows td.holds.none { color: var(--panel-dim); font-family: var(--sans); font-size: 14px; }
 table.rows td.holds.blocked { color: var(--blocked); font-family: var(--sans); font-size: 14px; }
+/* On a narrow screen a table scrolls sideways inside its panel instead of
+   being clipped by it. Cells stay on one line so the scroll is the whole
+   story; the one prose column, an agent's stated intent, still wraps. */
+@media (max-width: 640px) {
+  table.rows { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.rows th, table.rows td { white-space: nowrap; }
+  table.rows td.intent { white-space: normal; min-width: 180px; }
+}
 .tag { font-size: 12px; color: var(--panel-dim); margin-left: 8px; }
 .tag.mine { color: var(--held); }
 .tag.dead { color: var(--blocked); }
@@ -123,6 +136,8 @@ table.rows td.holds.blocked { color: var(--blocked); font-family: var(--sans); f
 
 /* ---------- log ---------- */
 .log { font-family: var(--mono); font-size: 12.5px; max-height: 56vh; overflow-y: auto; }
+/* A rule between who is present and what happened, only when both are drawn. */
+.panel > div:not(:empty) + .log { border-top: 1px solid var(--panel-rule); }
 .log .row {
   display: grid; grid-template-columns: 76px 88px 132px 1fr; gap: 14px;
   padding: 6px 16px; border-bottom: 1px solid #222830;
@@ -145,6 +160,12 @@ table.rows td.holds.blocked { color: var(--blocked); font-family: var(--sans); f
 .log .row.enter { animation: rowin .5s ease-out; }
 @keyframes rowin { from { background: var(--panel-2); } to { background: transparent; } }
 @media (max-width: 900px) { .log .row { grid-template-columns: 64px 72px 108px 1fr; gap: 10px; font-size: 11.8px; } }
+/* On a phone the detail takes its own line under time, agent and event. */
+@media (max-width: 640px) {
+  .log .row { grid-template-columns: 60px 72px 1fr; row-gap: 2px; }
+  .log .d { grid-column: 1 / -1; }
+  .log .row.h span:nth-child(4) { display: none; }
+}
 
 .empty { padding: 30px 16px; color: var(--panel-dim); font-size: 14.5px; line-height: 1.6; max-width: 60ch; }
 .empty code { color: var(--panel-text); }
@@ -168,6 +189,10 @@ table.rows td.holds.blocked { color: var(--blocked); font-family: var(--sans); f
   font: 14px var(--sans);
 }
 .inline-form select:focus { outline: none; border-color: var(--wire); }
+@media (max-width: 640px) {
+  .inline-form input { flex-basis: 100%; min-width: 0; }
+  .inline-form select { flex: 1; min-width: 0; }
+}
 
 /* A field label inside a panel body, where `.reveal` is not what is being
    labelled: the areas and members of a room. */

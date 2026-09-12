@@ -401,7 +401,7 @@ function drawPresence(): void {
           const cls = holds.length ? 'holds' : isBlocked ? 'holds blocked' : 'holds none';
           const txt = holds.length ? holds.join('  ') : isBlocked ? 'blocked, waiting' : 'nothing';
           return `<tr><td class="mono">${esc(s.user ?? s.session.slice(0, 8))}</td>
-            <td class="dim">${esc(s.intent || 'no stated intent yet')}</td>
+            <td class="dim intent">${esc(s.intent || 'no stated intent yet')}</td>
             <td class="${cls}">${esc(txt)}</td></tr>`;
         }).join('')}</tbody></table>`
     : '';
@@ -649,13 +649,15 @@ function viewRooms(): void {
               <td class="right">${canAdmin
                 ? `<button class="btn quiet sm" data-rm-member="${esc(r.id)}" data-member="${esc(m.id)}">Remove</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>` : '<p class="dim">Nobody yet.</p>'}
-          ${canAdmin ? `<div class="inline-form" style="margin-top:12px">
-            <select data-member-pick="${esc(r.id)}">
-              ${members.filter((m) => !r.members.some((x) => x.id === m.id))
-                .map((m) => `<option value="${esc(m.id)}">${esc(m.email)}</option>`).join('')}
-            </select>
-            <button class="btn quiet" data-add-member="${esc(r.id)}">Add to room</button>
-          </div>` : ''}
+          ${canAdmin ? (() => {
+            const candidates = members.filter((m) => !m.unassigned && !r.members.some((x) => x.id === m.id));
+            return candidates.length ? `<div class="inline-form" style="margin-top:12px">
+              <select data-member-pick="${esc(r.id)}">
+                ${candidates.map((m) => `<option value="${esc(m.id)}">${esc(m.email)}</option>`).join('')}
+              </select>
+              <button class="btn quiet" data-add-member="${esc(r.id)}">Add to room</button>
+            </div>` : '<p class="dim" style="margin-top:10px">Everyone on the team is in this room.</p>';
+          })() : ''}
           <div class="err" data-room-err="${esc(r.id)}" hidden></div>
         </div>
       </div>`).join('')}
