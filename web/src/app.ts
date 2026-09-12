@@ -162,12 +162,20 @@ $('#signout')!.addEventListener('click', async () => {
 /* ------------------------------------------------------------------ *
  * Views
  * ------------------------------------------------------------------ */
-const ROUTES = ['sessions', 'repositories', 'tokens', 'rooms', 'team', 'settings'] as const;
+const ROUTES = ['start', 'sessions', 'repositories', 'tokens', 'rooms', 'team', 'settings'] as const;
 type Route = (typeof ROUTES)[number];
 
+const connected = (): boolean => Boolean(relayTeam?.repos?.length);
+
+/**
+ * Until a repository has reached the relay there is nothing for the other
+ * tabs to show, so the console opens on the flow that gets one connected.
+ * After that, the live log is home and Get started stays a tab.
+ */
 function route(): Route {
   const h = location.hash.replace('#', '') as Route;
-  return ROUTES.includes(h) ? h : 'sessions';
+  if (ROUTES.includes(h)) return h;
+  return connected() ? 'sessions' : 'start';
 }
 
 function paintTabs(): void {
@@ -175,6 +183,7 @@ function paintTabs(): void {
   for (const a of document.querySelectorAll<HTMLAnchorElement>('.tabs a')) {
     a.classList.toggle('on', a.getAttribute('href') === `#${r}`);
   }
+  $('#tab-start')?.classList.toggle('done', progress().current === 0);
 }
 
 function render(): void {
@@ -183,6 +192,7 @@ function render(): void {
   live = null;
   stopSetupPoll();
   switch (route()) {
+    case 'start': return viewStart();
     case 'sessions': return viewSessions();
     case 'repositories': return viewRepositories();
     case 'tokens': return viewTokens();
@@ -195,7 +205,7 @@ function render(): void {
 /* ---- sessions: the live instrument ---- */
 function viewSessions(): void {
   const repos = relayTeam?.repos ?? [];
-  if (!repos.length) { viewSetup('Sessions', 'Every agent currently working a repository your team has connected, and the event log behind them.'); return; }
+  if (!repos.length) { viewNotConnected('Sessions', 'Every agent currently working a repository your team has connected, and the event log behind them.', 'The log fills in on its own the moment a daemon on an enrolled repository reaches the relay.'); return; }
   viewEl.innerHTML = `
     <div class="page">
       <div class="page-head">
@@ -229,60 +239,92 @@ function viewSessions(): void {
   startLive();
 }
 
-/* ---- first run: nothing has connected yet ---- */
+/* ---- get started: the one flow, with progress read from the relay ---- */
 /**
- * A team with no repository has one job: get a machine talking to the relay.
- * The steps are laid out in the order they are actually done, the key is
- * minted here so the join command below it is real, and the page watches the
- * relay so the moment the daemon starts, the live log takes over.
+ * Every step is checked against what the relay actually knows: a key exists,
+ * a repository has connected, a second person is on the team. Nothing is
+ * ticked because someone clicked "done", so the page is always honest about
+ * how far a team has really got.
  */
 let setupPoll: ReturnType<typeof setInterval> | null = null;
 function stopSetupPoll(): void {
   if (setupPoll) { clearInterval(setupPoll); setupPoll = null; }
 }
 
-function viewSetup(title: string, sub: string): void {
+/** Where a team is in the flow. `current` is 1-based; 0 once everything is done. */
+function progress(): { keys: number; repos: number; people: number; current: number; done: number } {
   const tokens = relayTeam?.tokens ?? [];
-  const liveKeys = tokens.filter((t) => !t.revoked).length;
+  const keys = tokens.filter((t) => !t.revoked).length;
+  const repos = relayTeam?.repos?.length ?? 0;
+  const people = (relayTeam?.members ?? []).filter((m) => !m.unassigned).length;
+  const flags = [keys > 0, keys > 0, repos > 0, repos > 0, people > 1];
+  const done = flags.filter(Boolean).length;
+  const current = flags.indexOf(false) + 1;
+  return { keys, repos, people, current, done };
+}
+
+function viewNotConnected(title: string, sub: string, note: string): void {
+  viewEl.innerHTML = `
+    <div class="page">
+      <div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(sub)}</p></div></div>
+      <div class="panel">
+        <div class="panel-body not-yet">
+          <p>Nothing is connected yet. ${esc(note)}</p>
+          <a class="btn" href="#start">Get started</a>
+        </div>
+      </div>
+    </div>`;
+}
+
+function viewStart(): void {
+  const p = progress();
   const cmd = (c: string, id = '') => `<div class="cmd-row"${id ? ` id="${id}"` : ''}><code>${esc(c)}</code><button class="copy" type="button">Copy</button></div>`;
+  const cls = (n: number, isDone: boolean) => `step${isDone ? ' done' : n === p.current ? ' now' : ' later'}`;
+  const finished = p.current === 0;
   viewEl.innerHTML = `
     <div class="page">
       <div class="page-head">
-        <div><h1>${esc(title)}</h1><p>${esc(sub)}</p></div>
+        <div>
+          <h1>Get started</h1>
+          <p>${finished
+            ? 'Everything is connected. The live log under Sessions is where the team shows up from here on.'
+            : 'Five steps take a team from nothing to a shared log of every agent session. The console watches the relay and ticks each one off as it happens.'}</p>
+        </div>
+        <div class="actions">${finished ? '<a class="btn" href="#sessions">Open sessions</a>' : ''}</div>
       </div>
       <div class="panel setup">
         <div class="panel-head">
-          <h2>Connect your first repository</h2>
-          <div class="right"><span class="state waiting" id="setup-wait"><i></i>waiting for a daemon to reach the relay</span></div>
+          <h2>${p.done} of 5 done</h2>
+          <div class="right">${p.repos
+            ? `<span class="state live">${p.repos} repositor${p.repos === 1 ? 'y' : 'ies'} connected</span>`
+            : '<span class="state waiting" id="setup-wait"><i></i>waiting for a daemon to reach the relay</span>'}</div>
         </div>
         <div class="panel-body">
-          <p>Four commands on the machine where your agents run. Once the daemon is up, this page becomes the live log on its own.</p>
-
           <ol class="steps">
-            <li class="step">
+            <li class="${cls(1, p.keys > 0)}">
               <div class="n">1</div>
               <div class="body">
-                <h3>Install knoot</h3>
-                <p>One binary. It serves as hook, daemon and CLI.</p>
+                <h3>Install knoot on the machine where agents run</h3>
+                <p>One binary. It is the hook, the daemon and the CLI.</p>
                 ${cmd('cargo install --git https://github.com/Ash20pk/knoot')}
               </div>
             </li>
-            <li class="step" id="step-key">
+            <li class="${cls(2, p.keys > 0)}" id="step-key">
               <div class="n">2</div>
               <div class="body">
                 <h3>Mint a key for that machine</h3>
-                <p>${liveKeys
-                  ? `You already have ${liveKeys} live key${liveKeys === 1 ? '' : 's'}. Use one you saved, or mint another for this machine.`
-                  : 'A key names one machine and one person. It is shown once, so keep the tab open until step 3 is done.'}</p>
+                <p>${p.keys
+                  ? `You have ${p.keys} live key${p.keys === 1 ? '' : 's'}. Use one you saved, or mint another for this machine.`
+                  : 'A key names one machine and one person. It is shown once, so keep this tab open until step 3 is done.'}</p>
                 <div class="inline-form">
                   <input id="setup-label" maxlength="40" placeholder="Label, such as laptop or ci" value="laptop">
-                  <button class="btn" id="setup-mint">Mint key</button>
+                  <button class="btn${p.keys ? ' quiet' : ''}" id="setup-mint">${p.keys ? 'Mint another' : 'Mint key'}</button>
                 </div>
                 <div id="setup-key"></div>
                 <div class="err" id="setup-err" hidden></div>
               </div>
             </li>
-            <li class="step">
+            <li class="${cls(3, p.repos > 0)}">
               <div class="n">3</div>
               <div class="body">
                 <h3>Enrol the repository and store the key</h3>
@@ -291,12 +333,22 @@ function viewSetup(title: string, sub: string): void {
                 ${cmd(`knoot join <key> --relay ${RELAY_WS}`, 'setup-join')}
               </div>
             </li>
-            <li class="step">
+            <li class="${cls(4, p.repos > 0)}">
               <div class="n">4</div>
               <div class="body">
                 <h3>Start the daemon</h3>
-                <p>It answers every hook locally and holds the connection to the relay. Leave it running; agents on this machine are coordinated from here on.</p>
+                <p>It answers every hook locally and holds the connection to the relay. Leave it running. ${p.repos ? 'It has reached the relay; the live log is under Sessions.' : 'This page notices the moment it connects.'}</p>
                 ${cmd('knoot daemon')}
+              </div>
+            </li>
+            <li class="${cls(5, p.people > 1)}">
+              <div class="n">5</div>
+              <div class="body">
+                <h3>Bring in the rest of the team</h3>
+                <p>${p.people > 1
+                  ? `${p.people} people are on the team. Each one mints their own key under Agent keys, so nothing is ever attributed to the wrong person.`
+                  : 'Each person gets their own key, so the relay can say who wrote what. Invite them under Team; they mint a key when they sign in.'}</p>
+                <a class="btn quiet sm" href="#team">${p.people > 1 ? 'Open team' : 'Invite a teammate'}</a>
               </div>
             </li>
           </ol>
@@ -315,12 +367,16 @@ function viewSetup(title: string, sub: string): void {
       const label = ($('#setup-label') as HTMLInputElement).value.trim() || 'laptop';
       const j = await api<{ token: string }>('/api/tokens', { method: 'POST', body: JSON.stringify({ label }) });
       $('#setup-key')!.innerHTML = `<div class="reveal">
-        <div class="lbl">Your key. This is the only time it is readable; the join command below now carries it.</div>
+        <div class="lbl">Your key. This is the only time it is readable; the join command in step 3 now carries it.</div>
         <div class="val">${esc(j.token)}</div></div>`;
       $('#setup-join')!.querySelector('code')!.textContent = `knoot join ${j.token} --relay ${RELAY_WS}`;
-      $('#step-key')!.classList.add('done');
+      const step = $('#step-key')!;
+      step.classList.remove('now', 'later');
+      step.classList.add('done');
       btn.textContent = 'Mint another';
+      btn.classList.add('quiet');
       await refreshRelayTeam();
+      paintTabs();
     } catch (e) {
       err.textContent = (e as Error).message;
       err.hidden = false;
@@ -330,18 +386,19 @@ function viewSetup(title: string, sub: string): void {
   });
 
   // The relay is the only thing that knows a repository has arrived, so ask
-  // it every few seconds. Rendering the live view replaces this page and
-  // clears the timer.
+  // it every few seconds while a step is still waiting on one.
   stopSetupPoll();
-  setupPoll = setInterval(async () => {
-    try {
-      await refreshRelayTeam();
-      if (relayTeam?.repos?.length) {
-        currentRepo = relayTeam.repos[0].repo;
-        render();
-      }
-    } catch { /* keep waiting; the next tick tries again */ }
-  }, 4000);
+  if (!p.repos) {
+    setupPoll = setInterval(async () => {
+      try {
+        await refreshRelayTeam();
+        if (relayTeam?.repos?.length) {
+          currentRepo = relayTeam.repos[0].repo;
+          render();
+        }
+      } catch { /* keep waiting; the next tick tries again */ }
+    }, 4000);
+  }
 }
 
 function startLive(): void {
@@ -418,7 +475,7 @@ function drawPresence(): void {
 /* ---- repositories ---- */
 function viewRepositories(): void {
   const repos = relayTeam?.repos ?? [];
-  if (!repos.length) { viewSetup('Repositories', 'A repository appears here the first time an agent on it reaches the relay. Nothing to create by hand.'); return; }
+  if (!repos.length) { viewNotConnected('Repositories', 'A repository appears here the first time an agent on it reaches the relay. Nothing to create by hand.', 'Your first one shows up here as soon as its daemon connects.'); return; }
   viewEl.innerHTML = `
     <div class="page">
       <div class="page-head">
@@ -500,18 +557,7 @@ function viewTokens(): void {
         </div>
       </div>` : ''}
 
-      <div class="panel">
-        <div class="panel-head"><h2>Use a token</h2></div>
-        <div class="panel-body steps">
-          <div class="step"><p>Install the binary on the machine that runs agents.</p>
-            <div class="cmd-row"><code>cargo install --git https://github.com/Ash20pk/knoot</code><button class="copy" type="button">Copy</button></div></div>
-          <div class="step"><p>Enrol the repository once, then commit what it writes.</p>
-            <div class="cmd-row"><code>knoot init --relay ${esc(RELAY_WS)}</code><button class="copy" type="button">Copy</button></div></div>
-          <div class="step"><p>Store the key on that machine and run the daemon. <code>join</code> asks the relay who the key is for and prints the rooms and areas it opens, so a wrong key fails here rather than quietly an hour later.</p>
-            <div class="cmd-row"><code>knoot join &lt;key&gt; --relay ${esc(RELAY_WS)}</code><button class="copy" type="button">Copy</button></div>
-            <div class="cmd-row"><code>knoot daemon</code><button class="copy" type="button">Copy</button></div></div>
-        </div>
-      </div>
+      <p class="setup-foot">Putting a key to work on a machine is steps 1 to 4 of <a href="#start">Get started</a>.</p>
     </div>`;
 
   wireCopyButtons(viewEl);
@@ -1088,6 +1134,7 @@ setInterval(async () => {
     const after = (relayTeam?.repos ?? []).map((r) => r.repo).join();
     if (before !== after && route() !== 'sessions') render();
     else if (before !== after && !currentRepo) render();
+    paintTabs();
   } catch { /* transient; the next tick tries again */ }
 }, 20000);
 

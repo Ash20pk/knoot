@@ -203,7 +203,10 @@ table.rows td.holds.blocked { color: var(--blocked); font-family: var(--sans); f
 .panel-body p.mono { font-family: var(--mono); font-size: 13px; line-height: 1.9; }
 .steps { counter-reset: s; }
 
-/* ---------- first-run setup ---------- */
+/* ---------- get started ---------- */
+.not-yet { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 22px 16px; }
+.not-yet p { flex: 1; min-width: 240px; margin: 0; }
+.tabs a.done::after { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--held); margin-left: 7px; vertical-align: 2px; }
 .setup .panel-body > p { max-width: 62ch; }
 .setup ol.steps { list-style: none; margin: 22px 0 0; padding: 0; }
 .setup .step { display: grid; grid-template-columns: 30px 1fr; gap: 16px; padding: 20px 0; border-top: 1px solid #222830; }
@@ -212,6 +215,9 @@ table.rows td.holds.blocked { color: var(--blocked); font-family: var(--sans); f
   width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--panel-dim);
   display: grid; place-items: center; font: 500 12.5px var(--mono); color: var(--panel-text); margin-top: 1px;
 }
+.setup .step.now .n { background: var(--panel-text); border-color: var(--panel-text); color: #12161a; }
+.setup .step.later h3, .setup .step.later .body > p { color: var(--panel-dim); }
+.setup .step.later .n { border-color: var(--panel-rule); color: var(--panel-dim); }
 .setup .step.done .n { border-color: var(--held); color: var(--held); }
 .setup .step.done .n::before { content: '✓'; }
 .setup .step.done .n { font-size: 0; }
