@@ -14,6 +14,31 @@ h3 { font-size: 18px; line-height: 1.3; }
 .lede { font-size: 17.5px; line-height: 1.55; color: var(--ink); }
 .hero-actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
 .hero-note { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
+/* ---------- hero field: the repository in three dimensions ---------- */
+.field { grid-column: 1 / -1; margin: 52px 0 0; }
+.field figcaption {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 1px solid var(--ink); font-size: 13.5px;
+}
+.field-status { color: var(--ink-2); font-family: var(--mono); font-size: 12.5px; min-height: 1.4em; }
+.field-stage {
+  position: relative; margin-top: 14px; height: clamp(300px, 38vw, 460px);
+  background: var(--panel); border: 1px solid #0c0f12; border-radius: 6px; overflow: hidden;
+}
+.field-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.field-labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.field-label {
+  position: absolute; left: 0; top: 0; font: 500 12.5px var(--mono); color: var(--panel-text);
+  white-space: nowrap; translate: -50% -100%; will-change: transform;
+}
+.field-label.file { color: var(--panel-dim); font-weight: 400; font-size: 11.5px; translate: -50% 0; }
+.field-key { display: flex; gap: 22px; margin-top: 10px; font-size: 13px; color: var(--ink-2); flex-wrap: wrap; }
+.field-key i { display: inline-block; width: 9px; height: 9px; border-radius: 1px; margin-right: 7px; vertical-align: -1px; }
+.field-key .held { background: var(--held); }
+.field-key .blocked { background: var(--blocked); }
+.field-key .wire { background: var(--wire); }
+.field + .workspace { margin-top: 44px; }
+
 /* ---------- hero workspace: several agent sessions at once ---------- */
 .workspace { grid-column: 1 / -1; margin: 52px 0 0; }
 .workspace figcaption {
