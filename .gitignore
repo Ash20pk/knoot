@@ -1,1 +1,4 @@
 /target
+
+# supabase CLI link state
+supabase/.temp/

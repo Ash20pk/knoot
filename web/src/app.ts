@@ -114,7 +114,19 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
     const sb = supabase!;
     if (mode === 'signup') {
       const { data, error } = await sb.auth.signUp({ email, password });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // The address is already an account, usually from an earlier attempt
+        // that failed later on. Sign-in is what they want; put them there.
+        if (/already|registered|exists/i.test(error.message)) {
+          mode = 'signin';
+          location.hash = '';
+          paintAuthMode();
+          authMessage('ok', `${email} already has an account. Sign in with its password, or choose Forgot password.`);
+          ($('#auth-password') as HTMLInputElement).focus();
+          return;
+        }
+        throw new Error(error.message);
+      }
       rememberTeamName(teamName);
       if (!data.session) {
         // The project requires email confirmation, so there is no session to
@@ -169,6 +181,7 @@ function render(): void {
   paintTabs();
   live?.close();
   live = null;
+  stopSetupPoll();
   switch (route()) {
     case 'sessions': return viewSessions();
     case 'repositories': return viewRepositories();
@@ -182,6 +195,7 @@ function render(): void {
 /* ---- sessions: the live instrument ---- */
 function viewSessions(): void {
   const repos = relayTeam?.repos ?? [];
+  if (!repos.length) { viewSetup('Sessions', 'Every agent currently working a repository your team has connected, and the event log behind them.'); return; }
   viewEl.innerHTML = `
     <div class="page">
       <div class="page-head">
@@ -208,12 +222,6 @@ function viewSessions(): void {
       </div>
     </div>`;
 
-  if (!repos.length) {
-    $('#log-rows')!.innerHTML = emptyRepoHtml();
-    wireCopyButtons(viewEl);
-    return;
-  }
-
   const pick = $('#repo-pick') as HTMLSelectElement;
   if (currentRepo && repos.some((r) => r.repo === currentRepo)) pick.value = currentRepo;
   currentRepo = pick.value;
@@ -221,12 +229,119 @@ function viewSessions(): void {
   startLive();
 }
 
-function emptyRepoHtml(): string {
-  return `<div class="empty">
-    No repository has connected yet. Enrol one where your agents run, then start the daemon.
-    <div class="cmd-row"><code>knoot init --relay ${esc(RELAY_WS)}</code><button class="copy" type="button">Copy</button></div>
-    <div class="cmd-row"><code>knoot daemon</code><button class="copy" type="button">Copy</button></div>
-  </div>`;
+/* ---- first run: nothing has connected yet ---- */
+/**
+ * A team with no repository has one job: get a machine talking to the relay.
+ * The steps are laid out in the order they are actually done, the key is
+ * minted here so the join command below it is real, and the page watches the
+ * relay so the moment the daemon starts, the live log takes over.
+ */
+let setupPoll: ReturnType<typeof setInterval> | null = null;
+function stopSetupPoll(): void {
+  if (setupPoll) { clearInterval(setupPoll); setupPoll = null; }
+}
+
+function viewSetup(title: string, sub: string): void {
+  const tokens = relayTeam?.tokens ?? [];
+  const liveKeys = tokens.filter((t) => !t.revoked).length;
+  const cmd = (c: string, id = '') => `<div class="cmd-row"${id ? ` id="${id}"` : ''}><code>${esc(c)}</code><button class="copy" type="button">Copy</button></div>`;
+  viewEl.innerHTML = `
+    <div class="page">
+      <div class="page-head">
+        <div><h1>${esc(title)}</h1><p>${esc(sub)}</p></div>
+      </div>
+      <div class="panel setup">
+        <div class="panel-head">
+          <h2>Connect your first repository</h2>
+          <div class="right"><span class="state waiting" id="setup-wait"><i></i>waiting for a daemon to reach the relay</span></div>
+        </div>
+        <div class="panel-body">
+          <p>Four commands on the machine where your agents run. Once the daemon is up, this page becomes the live log on its own.</p>
+
+          <ol class="steps">
+            <li class="step">
+              <div class="n">1</div>
+              <div class="body">
+                <h3>Install knoot</h3>
+                <p>One binary. It serves as hook, daemon and CLI.</p>
+                ${cmd('cargo install --git https://github.com/Ash20pk/knoot')}
+              </div>
+            </li>
+            <li class="step" id="step-key">
+              <div class="n">2</div>
+              <div class="body">
+                <h3>Mint a key for that machine</h3>
+                <p>${liveKeys
+                  ? `You already have ${liveKeys} live key${liveKeys === 1 ? '' : 's'}. Use one you saved, or mint another for this machine.`
+                  : 'A key names one machine and one person. It is shown once, so keep the tab open until step 3 is done.'}</p>
+                <div class="inline-form">
+                  <input id="setup-label" maxlength="40" placeholder="Label, such as laptop or ci" value="laptop">
+                  <button class="btn" id="setup-mint">Mint key</button>
+                </div>
+                <div id="setup-key"></div>
+                <div class="err" id="setup-err" hidden></div>
+              </div>
+            </li>
+            <li class="step">
+              <div class="n">3</div>
+              <div class="body">
+                <h3>Enrol the repository and store the key</h3>
+                <p>Run inside the repository. <code>init</code> writes the hook config, which you commit so every clone is enrolled. <code>join</code> checks the key with the relay and stores it for this machine.</p>
+                ${cmd(`knoot init --relay ${RELAY_WS}`)}
+                ${cmd(`knoot join <key> --relay ${RELAY_WS}`, 'setup-join')}
+              </div>
+            </li>
+            <li class="step">
+              <div class="n">4</div>
+              <div class="body">
+                <h3>Start the daemon</h3>
+                <p>It answers every hook locally and holds the connection to the relay. Leave it running; agents on this machine are coordinated from here on.</p>
+                ${cmd('knoot daemon')}
+              </div>
+            </li>
+          </ol>
+        </div>
+      </div>
+      <p class="setup-foot">Prefer to read first? <a href="/docs/">The docs</a> cover the hook contract and what crosses the wire. Only paths and intent sentences do; never code.</p>
+    </div>`;
+  wireCopyButtons(viewEl);
+
+  $('#setup-mint')!.addEventListener('click', async () => {
+    const btn = $('#setup-mint') as HTMLButtonElement;
+    const err = $('#setup-err') as HTMLElement;
+    err.hidden = true;
+    btn.disabled = true;
+    try {
+      const label = ($('#setup-label') as HTMLInputElement).value.trim() || 'laptop';
+      const j = await api<{ token: string }>('/api/tokens', { method: 'POST', body: JSON.stringify({ label }) });
+      $('#setup-key')!.innerHTML = `<div class="reveal">
+        <div class="lbl">Your key. This is the only time it is readable; the join command below now carries it.</div>
+        <div class="val">${esc(j.token)}</div></div>`;
+      $('#setup-join')!.querySelector('code')!.textContent = `knoot join ${j.token} --relay ${RELAY_WS}`;
+      $('#step-key')!.classList.add('done');
+      btn.textContent = 'Mint another';
+      await refreshRelayTeam();
+    } catch (e) {
+      err.textContent = (e as Error).message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // The relay is the only thing that knows a repository has arrived, so ask
+  // it every few seconds. Rendering the live view replaces this page and
+  // clears the timer.
+  stopSetupPoll();
+  setupPoll = setInterval(async () => {
+    try {
+      await refreshRelayTeam();
+      if (relayTeam?.repos?.length) {
+        currentRepo = relayTeam.repos[0].repo;
+        render();
+      }
+    } catch { /* keep waiting; the next tick tries again */ }
+  }, 4000);
 }
 
 function startLive(): void {
@@ -303,6 +418,7 @@ function drawPresence(): void {
 /* ---- repositories ---- */
 function viewRepositories(): void {
   const repos = relayTeam?.repos ?? [];
+  if (!repos.length) { viewSetup('Repositories', 'A repository appears here the first time an agent on it reaches the relay. Nothing to create by hand.'); return; }
   viewEl.innerHTML = `
     <div class="page">
       <div class="page-head">
@@ -312,13 +428,13 @@ function viewRepositories(): void {
         </div>
       </div>
       <div class="panel">
-        ${repos.length ? `<table class="rows">
+        <table class="rows">
           <thead><tr><th>Repository</th><th>Last activity</th><th></th></tr></thead>
           <tbody>${repos.map((r) => `<tr>
             <td class="mono">${esc(r.repo)}</td>
             <td class="dim">${esc(ago(r.last_seen_ts ?? null))}</td>
             <td class="right"><a class="btn quiet sm" href="#sessions" data-repo="${esc(r.repo)}">Open log</a></td>
-          </tr>`).join('')}</tbody></table>` : emptyRepoHtml()}
+          </tr>`).join('')}</tbody></table>
       </div>
     </div>`;
   for (const a of viewEl.querySelectorAll<HTMLAnchorElement>('[data-repo]')) {
