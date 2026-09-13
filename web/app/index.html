@@ -21,12 +21,12 @@
     <p class="auth-sub" id="auth-sub">Manage your team, agent tokens and live sessions.</p>
 
     <form id="auth-form">
-      <label class="field">
+      <label class="field" id="email-field">
         <span>Work email</span>
         <input id="auth-email" type="email" autocomplete="email" required placeholder="you@company.com">
       </label>
       <label class="field">
-        <span>Password</span>
+        <span id="password-label">Password</span>
         <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters">
       </label>
       <label class="field" id="team-field" hidden>
@@ -38,7 +38,7 @@
       <div class="ok" id="auth-ok" hidden></div>
     </form>
 
-    <div class="auth-alt">
+    <div class="auth-alt" id="auth-alt">
       <button type="button" class="linkish" id="auth-switch">Create an account</button>
       <button type="button" class="linkish" id="auth-reset">Forgot password</button>
     </div>

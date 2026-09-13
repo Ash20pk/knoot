@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wdth,wght@0,75..100,400..700;1,75..100,400..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/app-C2x45AdK.js"></script>
+  <script type="module" crossorigin src="/assets/app-BWJndbsD.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-P2Xu9kJm.js">
   <link rel="modulepreload" crossorigin href="/assets/relay-CtT8-rE5.js">
   <link rel="stylesheet" crossorigin href="/assets/relay-DprCBCf1.css">
@@ -24,12 +24,12 @@
     <p class="auth-sub" id="auth-sub">Manage your team, agent tokens and live sessions.</p>
 
     <form id="auth-form">
-      <label class="field">
+      <label class="field" id="email-field">
         <span>Work email</span>
         <input id="auth-email" type="email" autocomplete="email" required placeholder="you@company.com">
       </label>
       <label class="field">
-        <span>Password</span>
+        <span id="password-label">Password</span>
         <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters">
       </label>
       <label class="field" id="team-field" hidden>
@@ -41,7 +41,7 @@
       <div class="ok" id="auth-ok" hidden></div>
     </form>
 
-    <div class="auth-alt">
+    <div class="auth-alt" id="auth-alt">
       <button type="button" class="linkish" id="auth-switch">Create an account</button>
       <button type="button" class="linkish" id="auth-reset">Forgot password</button>
     </div>

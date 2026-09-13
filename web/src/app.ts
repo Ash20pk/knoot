@@ -44,20 +44,35 @@ const takeTeamName = (): string | null => {
   } catch { return null; }
 };
 
-type Mode = 'signin' | 'signup';
-let mode: Mode = location.hash === '#signup' ? 'signup' : 'signin';
+/**
+ * `recover` is where a password-reset link lands. Supabase signs the person
+ * in from the link and says so with a `PASSWORD_RECOVERY` event; without a
+ * page that catches it they would arrive in the console already signed in and
+ * never be asked for the new password the link was for. The fragment is read
+ * here too, before the client strips it, so the mode is right on first paint.
+ */
+type Mode = 'signin' | 'signup' | 'recover';
+let mode: Mode = /type=recovery/.test(location.hash) ? 'recover'
+  : location.hash === '#signup' ? 'signup' : 'signin';
 
 function paintAuthMode(): void {
   const signup = mode === 'signup';
-  $('#auth-title')!.textContent = signup ? 'Create your account' : 'Sign in';
-  $('#auth-sub')!.textContent = signup
-    ? 'A team, an agent token, and a live log of every session. No card needed.'
-    : 'Manage your team, agent tokens and live sessions.';
-  $('#auth-go')!.textContent = signup ? 'Create account' : 'Sign in';
+  const recover = mode === 'recover';
+  $('#auth-title')!.textContent = recover ? 'Choose a new password' : signup ? 'Create your account' : 'Sign in';
+  $('#auth-sub')!.textContent = recover
+    ? 'You followed a reset link. Set the password you will sign in with from now on.'
+    : signup
+      ? 'A team, an agent token, and a live log of every session. No card needed.'
+      : 'Manage your team, agent tokens and live sessions.';
+  $('#auth-go')!.textContent = recover ? 'Set password' : signup ? 'Create account' : 'Sign in';
   $('#auth-switch')!.textContent = signup ? 'I already have an account' : 'Create an account';
+  $('#password-label')!.textContent = recover ? 'New password' : 'Password';
+  ($('#email-field') as HTMLElement).hidden = recover;
+  ($('#auth-email') as HTMLInputElement).required = !recover;
+  ($('#auth-alt') as HTMLElement).hidden = recover;
   ($('#team-field') as HTMLElement).hidden = !signup;
   ($('#auth-team') as HTMLInputElement).required = signup;
-  ($('#auth-password') as HTMLInputElement).autocomplete = signup ? 'new-password' : 'current-password';
+  ($('#auth-password') as HTMLInputElement).autocomplete = signup || recover ? 'new-password' : 'current-password';
 }
 
 function authMessage(kind: 'err' | 'ok' | 'clear', text = ''): void {
@@ -112,6 +127,14 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
   btn.textContent = mode === 'signup' ? 'Creating account' : 'Signing in';
   try {
     const sb = supabase!;
+    if (mode === 'recover') {
+      const { error } = await sb.auth.updateUser({ password });
+      if (error) throw new Error(error.message);
+      mode = 'signin';
+      history.replaceState(null, '', location.pathname);
+      await boot();
+      return;
+    }
     if (mode === 'signup') {
       const { data, error } = await sb.auth.signUp({ email, password });
       if (error) {
@@ -1302,6 +1325,8 @@ async function boot(): Promise<void> {
   if (!configured) { showAuth(); return; }
   const { data } = await supabase!.auth.getSession();
   if (!data.session) { stashInvite(); showAuth(); return; }
+  // Signed in by a reset link: ask for the new password before anything else.
+  if (mode === 'recover') { showAuth(); ($('#auth-password') as HTMLInputElement).focus(); return; }
 
   bootEl.hidden = false;
   authEl.hidden = true;
@@ -1343,8 +1368,21 @@ async function boot(): Promise<void> {
   render();
 }
 
+// The client parses the recovery fragment on its own schedule; if it gets
+// there before this module read the hash, the event is what says so.
+supabase?.auth.onAuthStateChange((event) => {
+  if (event === 'PASSWORD_RECOVERY' && mode !== 'recover') {
+    mode = 'recover';
+    showAuth();
+    ($('#auth-password') as HTMLInputElement).focus();
+  }
+});
+
 addEventListener('hashchange', () => {
-  if (shellEl.hidden) { mode = location.hash === '#signup' ? 'signup' : 'signin'; paintAuthMode(); return; }
+  if (shellEl.hidden) {
+    if (mode !== 'recover') { mode = location.hash === '#signup' ? 'signup' : 'signin'; paintAuthMode(); }
+    return;
+  }
   render();
 });
 
