@@ -329,8 +329,53 @@ followed neither.
   belongs, because the writer's session had ended and been pruned — on two
   code paths. Fixed; the view now remembers every author it has seen. And
   Codex's npm and Homebrew installs both failed to download on this machine,
-  so the live Codex arm is still owed: thirteen tests drive its exact payload
-  shapes, and a real session has not yet been run.
+  so the live Codex arm was owed: thirteen tests drive its exact payload
+  shapes, and a real session had not yet been run. ~~Owed~~ — run, below.
+
+*Live, 13 September 2026 — Codex, for real.* Codex CLI 0.154 (gpt-5.5), its
+hooks feature on, against a real relay and daemon, on a scratch repo with one
+fact planted about `src/auth.js` (auth functions return `{ok:false, code}`,
+never throw). Claude Code (Haiku) was given a three-step refactor of that file
+and took it; Codex was started twelve seconds later and told to add a function
+to the same file.
+
+- **Codex saw the peer before it was blocked.** Its first words were *"I see
+  `src/auth.js` is already active in another session, and this change
+  overlaps that file. I'll coordinate first so we don't step on the same
+  patch."* That is the turn-start brief, read and acted on.
+- **The deny reached it as a brief, and it re-planned on it.** On its patch:
+  *"The edit hook caught the overlap: `src/auth.js` is claimed by
+  `ash@knoot.local`, and they wrote it moments after I read it. I'm going to
+  coordinate through `knoot` now and wait for the file to be released rather
+  than forcing a conflicting edit."* Both halves are on the log:
+  `claim_denied 1`, `stale_read 1`. It waited, re-read, retried after
+  `path_freed`, and landed a clean patch. `node test.js` passed.
+- **Memory changed what both wrote.** Claude Code's closing line: *"All three
+  functions now follow the error-shape pattern from src/auth.js: return
+  `{ok: false, code}` on failure."* Codex: *"I'm going to use the existing
+  `{ ok: false, code }` shape."* Codex read the convention off the file
+  Claude Code had already rewritten, so for Codex the brief and the file
+  cannot be separated in this run; for Claude Code the seed file exhibited
+  neither, so the fact is the only source.
+- **A capable model does run the command it is told to run.** The brief says
+  to coordinate with `knoot msg`, and Codex ran it — three times, plus
+  `knoot who`. Haiku never did in six lab runs. Which exposed the defect:
+- **Defect: knoot's CLI cannot reach the daemon from inside Codex's sandbox.**
+  Every call failed with *"knootd not running — start it with `knoot
+  daemon`"*, and Codex concluded *"`knoot` isn't running in this
+  workspace"*. Hooks are fine — Codex runs them outside the sandbox — but a
+  command the agent runs itself goes through `workspace-write`, which denies
+  the connect to `~/.knoot/knootd.sock` because it is outside the workspace.
+  Confirmed by rerunning the same `knoot who` under `danger-full-access`,
+  where it printed the session. So today the brief tells Codex to do
+  something Codex cannot do, and then the daemon looks dead. Codex has two
+  config knobs that would open it (`[sandbox_workspace_write] writable_roots`
+  and `network.allow_unix_sockets`), or the daemon can listen at a socket
+  inside the workspace as well. Not fixed yet; the decision is which.
+- **One thing that is not a bug.** Both sessions are attributed to
+  `ash@knoot.local` because both ran under one device key on one laptop; the
+  `KNOOT_USER` the harness set is ignored on purpose. The log tells them apart
+  by session.
 
 *One thing that is not a bug.* Every claim is attributed to
 `lab@knoot.local`, because four agents on one machine share one device key and
