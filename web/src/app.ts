@@ -222,7 +222,7 @@ function render(): void {
     case 'repositories': return viewRepositories();
     case 'tokens': return viewTokens();
     case 'rooms': return viewRooms();
-    case 'team': return viewTeam();
+    case 'team': void viewTeam(); return;
     case 'settings': return viewSettings();
   }
 }
@@ -336,7 +336,7 @@ function viewStart(): void {
               <div class="n">1</div>
               <div class="body">
                 <h3>Install knoot on the machine where agents run</h3>
-                <p>One binary. It is the hook, the daemon and the CLI.</p>
+                <p>One binary. It is the hook, the daemon and the CLI. Prebuilt Linux and macOS builds are on the <a href="https://github.com/Ash20pk/knoot/releases/tag/nightly">nightly release</a> if you would rather not compile.</p>
                 ${cmd('cargo install --git https://github.com/Ash20pk/knoot')}
               </div>
             </li>

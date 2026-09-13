@@ -1,12 +1,14 @@
-# Build the Linux binary here, not on the box it runs on.
+# Build the binaries here, not on the boxes they run on.
 #
 # The droplet is 1 vCPU / 961 MB: a release build with LTO needs a 2 GB
 # swapfile to link at all, takes minutes, and competes for memory with the
 # relay it is about to replace. Building here and downloading there makes a
 # deploy a 30-second file copy.
 #
-# musl, statically linked, so one artifact runs on any Linux without caring
-# which glibc the host shipped.
+# Linux is musl, statically linked, so one artifact runs on any Linux without
+# caring which glibc the host shipped. macOS gets one build per architecture,
+# because a laptop is where most agents actually run and `cargo install` was
+# the only way onto one.
 name: release
 
 on:
@@ -19,32 +21,23 @@ permissions:
   contents: write
 
 jobs:
-  linux:
+  # The web front end is embedded into every binary, so it is built once and
+  # handed to each platform job. Building it here also means a broken front
+  # end — or one that no longer typechecks — fails the release rather than
+  # shipping a stale one.
+  web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install the musl target
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq musl-tools
-          rustup target add x86_64-unknown-linux-musl
-
-      - uses: Swatinem/rust-cache@v2
-
-      # The web front end is embedded into the binary, so it has to exist
-      # before rustc runs. Building it here also means a broken front end
-      # fails the release rather than shipping a stale one.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
-
       # `build`, not `build:oss`: the release binary is the hosted one and gets
       # the real publishable key. The dist committed to the repository is built
       # keyless, so `cargo install --git` never inherits someone's project.
-      - name: Build the web front end
+      - name: Typecheck and build the web front end
         env:
           # The publishable key is public by design and ends up in the bundle.
           # The secret key is never built in; the relay reads it at run time.
@@ -52,9 +45,56 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
         run: |
           npm --prefix web ci
+          npm --prefix web run typecheck
           npm --prefix web run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
 
+  build:
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact: knoot-x86_64-linux
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: knoot-aarch64-macos
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: knoot-x86_64-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Install the musl target
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Install the macOS target
+        if: runner.os == 'macOS'
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # The suite runs once, on Linux, where the relay is deployed. The macOS
+      # jobs build; a macOS-only failure would show up in the build.
       - name: Test
+        if: runner.os == 'Linux'
         run: cargo test --locked
 
       - name: Build
@@ -63,33 +103,56 @@ jobs:
           # to be told to use the musl toolchain rather than the host's.
           CC_x86_64_unknown_linux_musl: musl-gcc
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package
         run: |
-          install -m 0755 target/x86_64-unknown-linux-musl/release/knoot knoot-x86_64-linux
-          # Statically linked, or the whole point — one artifact that runs on
-          # any Linux regardless of its glibc — is lost. `file` is the
-          # authority here: musl produces a static-pie, for which `ldd` prints
-          # "statically linked" rather than "not a dynamic executable", so
-          # grepping ldd fails a binary that is in fact fine.
-          file knoot-x86_64-linux
-          file knoot-x86_64-linux | grep -qE "static-pie linked|statically linked" \
-            || { echo "binary is not statically linked"; exit 1; }
-          ./knoot-x86_64-linux --version
-          sha256sum knoot-x86_64-linux > knoot-x86_64-linux.sha256
-          cat knoot-x86_64-linux.sha256
+          install -m 0755 target/${{ matrix.target }}/release/knoot ${{ matrix.artifact }}
+          file ${{ matrix.artifact }}
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            # Statically linked, or the whole point — one artifact that runs
+            # on any Linux regardless of its glibc — is lost. `file` is the
+            # authority here: musl produces a static-pie, for which `ldd`
+            # prints "statically linked" rather than "not a dynamic
+            # executable", so grepping ldd fails a binary that is in fact fine.
+            file ${{ matrix.artifact }} | grep -qE "static-pie linked|statically linked" \
+              || { echo "binary is not statically linked"; exit 1; }
+          fi
+          ./${{ matrix.artifact }} --version
+          shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          cat ${{ matrix.artifact }}.sha256
 
-      # A single moving tag the provisioner can always point at, plus the
-      # commit it was built from so a deploy is traceable to a revision.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
+          if-no-files-found: error
+
+  # A single moving tag the provisioner can always point at, plus the commit
+  # it was built from so a deploy is traceable to a revision. One job, after
+  # every platform, so the tag never carries a Linux binary from one commit
+  # and a macOS binary from another.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: knoot-*
+          merge-multiple: true
+          path: out
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -l out
           gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
           gh release create nightly \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "nightly ($(git rev-parse --short "$GITHUB_SHA"))" \
-            --notes "Static x86_64 Linux build of $(git rev-parse --short "$GITHUB_SHA"): $(git log -1 --format=%s "$GITHUB_SHA")" \
-            knoot-x86_64-linux knoot-x86_64-linux.sha256
+            --notes "Builds of $(git rev-parse --short "$GITHUB_SHA") for Linux x86_64 (static), macOS Apple silicon and macOS Intel: $(git log -1 --format=%s "$GITHUB_SHA")" \
+            out/*

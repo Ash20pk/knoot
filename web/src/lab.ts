@@ -23,7 +23,6 @@ const $ = (id: string) => document.getElementById(id)!;
 const esc = (s: any) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 const hhmm = (ts: number) => new Date(ts).toLocaleTimeString([], { hour12: false });
-const short = (s: any) => String(s).slice(0, 8);
 
 let repo: string | null = null;
 let sessions = new Map<string, any>();
