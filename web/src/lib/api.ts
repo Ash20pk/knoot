@@ -107,3 +107,29 @@ export type TeamPayload = {
   repos: Array<{ repo: string; last_seen_ts?: number | null }>;
   token_id?: string;
 };
+
+/** One head of a memory chain as the relay hands it to the console. */
+export type MemoryItem = {
+  id: string;
+  kind: 'facts' | 'repo_cache' | 'session_context' | string;
+  name?: string;
+  text?: string;
+  paths?: string[];
+  decisions?: string[];
+  derived?: boolean;
+  author_email: string;
+  created_ts: number;
+  expires_ts: number | null;
+  supersedes: string | null;
+  area?: string;
+  stale?: string | null;
+  bytes?: number;
+};
+
+export type MemoryPayload = {
+  provider: string;
+  /** False under a confidential provider: the relay holds ciphertext only. */
+  readable: boolean;
+  items: MemoryItem[];
+  unreadable: number;
+};

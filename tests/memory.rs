@@ -829,3 +829,83 @@ async fn a_secret_is_refused_in_a_plan_and_in_a_cache_entry_too() {
     )
     .contains("not published"));
 }
+
+// ------------------------------------------------------ the console's view
+
+/// `GET /api/memory` is `knoot recall` for a browser. It hands back the head
+/// of every chain the caller's rooms grant, opened where the provider lets the
+/// relay open it, with the same author the seal binds — and nothing from an
+/// area the key does not hold.
+#[tokio::test]
+async fn the_console_reads_what_the_rooms_know_and_nothing_else() {
+    let (c, _root, id) = repo("console").await;
+    let mut peer = Peer::connect(c, &id).await;
+    let first = peer.publish(c, &id, "/", "money", "cents, never floats", &["src/billing.js"]).await;
+    settle().await;
+    // A second statement under the same name supersedes the first: the
+    // console must show one head, not two standing claims.
+    let _second = {
+        use knoot::memory::{self, KeyProvider};
+        let scope = memory::Scope { team: c.team.clone(), repo: id.clone(), area: "/".into() };
+        let fact = memory::Fact {
+            name: "money".into(),
+            text: "integer cents, never floats".into(),
+            paths: vec!["src/billing.js".into()],
+            hashes: Default::default(),
+            decisions: Vec::new(),
+            derived: false,
+        };
+        let plain = serde_json::to_vec(&fact).unwrap();
+        let sid = format!("sh_{}", uuid::Uuid::new_v4().simple());
+        let p = memory::Plaintext;
+        let (epoch, secret) = p.epoch(&scope);
+        let key = scope.key();
+        let aad = memory::aad(&sid, &key, "facts", &c.peer_member, &c.peer_email, epoch);
+        let sealed = p.seal(&scope, &aad, &plain);
+        peer.send(&ClientMsg::MemPublish {
+            shard: memory::Shard {
+                id: sid.clone(),
+                scope: key,
+                kind: "facts".into(),
+                author: c.peer_member.clone(),
+                author_email: c.peer_email.clone(),
+                device: "d".into(),
+                name_blind: memory::name_blind(&secret, "money"),
+                supersedes: Some(first.clone()),
+                epoch,
+                nonce: sealed.nonce,
+                ciphertext: sealed.ciphertext,
+                bytes: plain.len() as i64,
+                seq: 0,
+                created_ts: now_ms() + 1,
+                expires_ts: None,
+            },
+        })
+        .await;
+        sid
+    };
+    // And one in an area nobody's room grants, which must not be stored, let
+    // alone shown.
+    let _leak = peer.publish(c, &id, "src/secret-area", "leak", "must not show", &[]).await;
+    settle().await;
+
+    let base = c.url.replacen("ws://", "http://", 1).trim_end_matches("/ws").to_string();
+    let (code, j) = http("GET", &format!("{base}/api/memory?repo={id}"), Some(&c.peer_key), None).await;
+    assert_eq!(code, 200, "{j}");
+    assert_eq!(j["readable"], true, "a plaintext relay opens shards for the console: {j}");
+    let items = j["items"].as_array().expect("items");
+    let money: Vec<&Value> = items.iter().filter(|i| i["name"] == "money").collect();
+    assert_eq!(money.len(), 1, "one head per chain, not every statement ever made: {j}");
+    assert_eq!(money[0]["text"], "integer cents, never floats", "the head is the latest statement");
+    assert_eq!(money[0]["author_email"], c.peer_email, "authorship comes from the seal");
+    assert_eq!(money[0]["paths"][0], "src/billing.js");
+    assert!(money[0]["stale"].is_null(), "nothing has written the file since");
+    assert!(items.iter().all(|i| i["text"] != "must not show"), "an ungranted area never reaches the console: {j}");
+
+    // On an open relay a caller with no credential is the built-in root team,
+    // whose rooms grant none of Acme's areas — so it is told nothing, the same
+    // way `/api/events` shows it none of Acme's log.
+    let (code, j) = http("GET", &format!("{base}/api/memory?repo={id}"), None, None).await;
+    assert_eq!(code, 200, "{j}");
+    assert!(j["items"].as_array().is_some_and(|a| a.is_empty()), "another team's memory is not readable: {j}");
+}

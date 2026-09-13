@@ -612,6 +612,7 @@ fn routes(app: Arc<App>) -> Router {
         .route("/term/ws/:idx", get(term_ws_handler))
         .route("/api/repos", get(repos_handler))
         .route("/api/events", get(events_handler))
+        .route("/api/memory", get(memory_handler))
         .route("/api/register", axum::routing::post(register_handler))
         .route("/api/team", get(team_handler))
         .route("/api/whoami", get(whoami_handler))
@@ -1363,6 +1364,103 @@ async fn events_body(app: Arc<App>, q: EventsQuery) -> impl IntoResponse {
         }
     }
     Json(out)
+}
+
+#[derive(serde::Deserialize)]
+struct MemoryQuery {
+    repo: String,
+}
+
+/// What a repository's rooms know, for the console.
+///
+/// Only the scopes the caller's own rooms grant, the same check every other
+/// memory path makes. Under the `plaintext` provider the relay opens each
+/// shard here and returns the head of every chain with its staleness worked
+/// out from the log, which is what `knoot recall` prints on a machine. Under
+/// `mls` the relay cannot open anything, so it says so and returns the
+/// metadata it does hold — kind, author, age — and nothing it would have to
+/// guess at.
+async fn memory_handler(
+    State(app): State<Arc<App>>,
+    Query(q): Query<MemoryQuery>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+) -> axum::response::Response {
+    let Some(id) = identify(&app, &headers, uri.query()).await else {
+        return unauthorized();
+    };
+    let scopes = scopes_for(&id, &q.repo);
+    let readable = app.provider == crate::proto::PROVIDER_PLAINTEXT;
+    let shards = {
+        let db = app.db.lock().unwrap();
+        crate::memory::since(&db, &scopes, 0, 5000)
+    };
+
+    if !readable {
+        let items: Vec<serde_json::Value> = shards
+            .iter()
+            .map(|sh| {
+                serde_json::json!({
+                    "id": sh.id, "kind": sh.kind, "author_email": sh.author_email,
+                    "created_ts": sh.created_ts, "expires_ts": sh.expires_ts,
+                    "bytes": sh.bytes, "supersedes": sh.supersedes,
+                })
+            })
+            .collect();
+        return Json(serde_json::json!({
+            "provider": app.provider, "readable": false, "items": items, "unreadable": 0,
+        }))
+        .into_response();
+    }
+
+    // Open every shard the way a daemon would, then hand back the head of
+    // each chain — the same resolution of contradictions an agent sees.
+    let provider = crate::memory::Plaintext;
+    let mut cache = crate::memory::Cache::default();
+    for sh in shards {
+        let scope = scope_of_key(&sh.scope);
+        cache.apply(&provider, &scope, sh);
+    }
+    let repos = app.repos.lock().unwrap();
+    let key = id.scope(&q.repo);
+    let (last_write, authors) = repos
+        .get(&key)
+        .map(|st| (st.view.last_write.clone(), st.view.authors.clone()))
+        .unwrap_or_default();
+    drop(repos);
+    let who = |s: &str| authors.get(s).cloned().unwrap_or_else(|| s.to_string());
+    let items: Vec<serde_json::Value> = cache
+        .heads()
+        .into_iter()
+        .map(|h| {
+            // No repo root here: a write back to identical bytes cannot be told
+            // apart on the relay, so the flag says "possibly", as it always has.
+            let stale = crate::memory::staleness(h, &last_write, &who, None);
+            serde_json::json!({
+                "id": h.shard.id, "kind": h.shard.kind, "name": h.fact.name, "text": h.fact.text,
+                "paths": h.fact.paths, "decisions": h.fact.decisions, "derived": h.fact.derived,
+                "author_email": h.shard.author_email, "created_ts": h.shard.created_ts,
+                "expires_ts": h.shard.expires_ts, "supersedes": h.shard.supersedes,
+                "area": scope_of_key(&h.shard.scope).area, "stale": stale,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "provider": app.provider, "readable": true, "items": items,
+        "unreadable": cache.unreadable(),
+    }))
+    .into_response()
+}
+
+/// A scope back from its storage key. The area is whatever follows the second
+/// slash, because an area is a path and paths have slashes.
+fn scope_of_key(key: &str) -> crate::memory::Scope {
+    let mut it = key.splitn(3, '/');
+    crate::memory::Scope {
+        team: it.next().unwrap_or("").to_string(),
+        repo: it.next().unwrap_or("").to_string(),
+        area: it.next().unwrap_or("/").to_string(),
+    }
 }
 
 /// One file's history: every event that names it, and the session-level

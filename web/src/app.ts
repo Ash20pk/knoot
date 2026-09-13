@@ -1,5 +1,5 @@
 import { RELAY_WS, esc, wireCopyButtons } from './lib/relay';
-import { api, type TeamPayload, type RelayEvent, type RelayMember, type Area } from './lib/api';
+import { api, type TeamPayload, type RelayEvent, type RelayMember, type Area, type MemoryPayload, type MemoryItem } from './lib/api';
 import { LiveRepo, EVENT_CLASS, eventDetail, ago } from './lib/live';
 import {
   configured, supabase, loadTeam, createTeam, inviteMember, listInvites, revokeInvite,
@@ -162,7 +162,7 @@ $('#signout')!.addEventListener('click', async () => {
 /* ------------------------------------------------------------------ *
  * Views
  * ------------------------------------------------------------------ */
-const ROUTES = ['start', 'sessions', 'repositories', 'tokens', 'rooms', 'team', 'settings'] as const;
+const ROUTES = ['start', 'sessions', 'memory', 'history', 'repositories', 'tokens', 'rooms', 'team', 'settings'] as const;
 type Route = (typeof ROUTES)[number];
 
 const connected = (): boolean => Boolean(relayTeam?.repos?.length);
@@ -194,6 +194,8 @@ function render(): void {
   switch (route()) {
     case 'start': return viewStart();
     case 'sessions': return viewSessions();
+    case 'memory': return viewMemory();
+    case 'history': return viewHistory();
     case 'repositories': return viewRepositories();
     case 'tokens': return viewTokens();
     case 'rooms': return viewRooms();
@@ -232,6 +234,12 @@ function viewSessions(): void {
       </div>
     </div>`;
 
+  viewEl.addEventListener('click', (ev) => {
+    const a = (ev.target as HTMLElement).closest<HTMLAnchorElement>('[data-why]');
+    if (!a) return;
+    ev.preventDefault();
+    openHistory(a.dataset.why!);
+  });
   const pick = $('#repo-pick') as HTMLSelectElement;
   if (currentRepo && repos.some((r) => r.repo === currentRepo)) pick.value = currentRepo;
   currentRepo = pick.value;
@@ -422,7 +430,7 @@ function rowHtml(e: RelayEvent, entering: boolean): string {
   const t = e.ts ? new Date(e.ts).toLocaleTimeString([], { hour12: false }).slice(0, 8) : '';
   return `<div class="row${k === 'blocked' ? ' is-blocked' : ''}${entering ? ' enter' : ''}">
     <span class="t">${esc(t)}</span><span class="u">${esc(e.user ?? '')}</span>
-    <span class="k ${k}">${esc(e.type)}</span><span class="d">${esc(eventDetail(e))}</span></div>`;
+    <span class="k ${k}">${esc(e.type)}</span><span class="d">${e.path ? `<a href="#history" data-why="${esc(e.path)}">${esc(e.path)}</a>${esc(eventDetail(e).replace(e.path, ''))}` : esc(eventDetail(e))}</span></div>`;
 }
 
 function drawLog(rowsEl: Element, logEl: Element): void {
@@ -470,6 +478,222 @@ function drawPresence(): void {
       `<span><b>${n}</b>session${n === 1 ? '' : 's'}</span><span><b>${c}</b>claim${c === 1 ? '' : 's'}</span>` +
       (b ? `<span class="blocked"><b>${b}</b>blocked</span>` : '');
   }
+}
+
+
+/* ---- a repo picker the read-only views share ---- */
+function repoPicker(id: string): string {
+  const repos = relayTeam?.repos ?? [];
+  return `<select class="picker" id="${id}" aria-label="Repository">${repos
+    .map((r) => `<option value="${esc(r.repo)}"${r.repo === currentRepo ? ' selected' : ''}>${esc(r.repo)}</option>`).join('')}</select>`;
+}
+function bindRepoPicker(id: string, then: () => void): void {
+  const pick = $(id) as HTMLSelectElement | null;
+  if (!pick) return;
+  if (!currentRepo || !(relayTeam?.repos ?? []).some((r) => r.repo === currentRepo)) currentRepo = pick.value;
+  pick.value = currentRepo!;
+  pick.addEventListener('change', () => { currentRepo = pick.value; then(); });
+}
+
+/* ---- memory: what the rooms know ---- */
+/**
+ * The head of every chain the caller's rooms hold, opened by the relay where
+ * the deployment lets it. This is the thing the lab proved changes what an
+ * agent writes, so it gets a view of its own rather than a footnote on Rooms.
+ */
+const KIND_LABEL: Record<string, string> = {
+  facts: 'fact',
+  repo_cache: 'derived',
+  session_context: 'session',
+};
+
+function viewMemory(): void {
+  const repos = relayTeam?.repos ?? [];
+  if (!repos.length) { viewNotConnected('Memory', 'What the team has written down about each repository, and who wrote it.', 'Memory is scoped to a repository, so the first fact can only follow the first connection.'); return; }
+  viewEl.innerHTML = `
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>Memory</h1>
+          <p>What the team has written down about a repository: conventions, decisions, gotchas. Each one names the files it is about and is flagged the moment somebody changes them. Agents read this on the turn they open the same code.</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Known</h2>
+          ${repoPicker('mem-repo')}
+          <input class="picker" id="mem-q" type="search" placeholder="Filter" aria-label="Filter memory">
+          <div class="right"><span class="state" id="mem-state"></span></div>
+        </div>
+        <div id="mem-body"><div class="empty">Loading.</div></div>
+      </div>
+      <p class="setup-foot">Write one from any enrolled machine: <code>knoot remember --name money --path src/billing.js "all money is integer cents"</code>. Nothing here is derived from a transcript; every line was published on purpose.</p>
+    </div>`;
+
+  let all: MemoryPayload | null = null;
+  const draw = (): void => {
+    const body = $('#mem-body')!;
+    const state = $('#mem-state')!;
+    if (!all) return;
+    const q = (($('#mem-q') as HTMLInputElement).value || '').trim().toLowerCase();
+    const items = all.items.filter((i) => !q || JSON.stringify(i).toLowerCase().includes(q));
+    const heads = all.items.length;
+    state.textContent = all.readable
+      ? `${heads} ${heads === 1 ? 'entry' : 'entries'}${all.unreadable ? `, ${all.unreadable} unreadable` : ''}`
+      : `${heads} sealed`;
+    if (!all.readable) {
+      body.innerHTML = `<div class="empty">This relay seals memory end to end (<code>${esc(all.provider)}</code>), so the console can see that ${heads} ${heads === 1 ? 'entry exists' : 'entries exist'} but not what ${heads === 1 ? 'it says' : 'they say'}. Read it on an enrolled machine with <code>knoot recall</code>.</div>${
+        heads ? `<table class="rows"><thead><tr><th>Kind</th><th>Written by</th><th>When</th></tr></thead><tbody>${
+          items.map((i) => `<tr><td>${esc(KIND_LABEL[i.kind] ?? i.kind)}</td><td>${esc(i.author_email)}</td><td class="dim">${esc(ago(i.created_ts))}</td></tr>`).join('')
+        }</tbody></table>` : ''}`;
+      return;
+    }
+    if (!items.length) {
+      body.innerHTML = `<div class="empty">${heads
+        ? 'Nothing matches that filter.'
+        : `Nothing written down for this repository yet. The first fact usually pays for itself the next time somebody opens the file it names.`}</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="facts">${items.map(factHtml).join('')}</div>`;
+    for (const a of body.querySelectorAll<HTMLAnchorElement>('[data-why]')) {
+      a.addEventListener('click', (ev) => { ev.preventDefault(); openHistory(a.dataset.why!); });
+    }
+  };
+
+  const load = async (): Promise<void> => {
+    $('#mem-body')!.innerHTML = '<div class="empty">Loading.</div>';
+    try {
+      all = await api<MemoryPayload>(`/api/memory?repo=${encodeURIComponent(currentRepo!)}`);
+      draw();
+    } catch (e) {
+      $('#mem-body')!.innerHTML = `<div class="empty">Could not load memory: ${esc((e as Error).message)}</div>`;
+    }
+  };
+  bindRepoPicker('#mem-repo', () => { void load(); });
+  $('#mem-q')!.addEventListener('input', draw);
+  void load();
+}
+
+function factHtml(i: MemoryItem): string {
+  const kind = KIND_LABEL[i.kind] ?? i.kind;
+  const title = i.kind === 'session_context'
+    ? (i.derived ? 'appears to be working on' : 'plan') : (i.name ?? '');
+  return `<article class="fact${i.stale ? ' is-stale' : ''}">
+    <div class="fact-head">
+      <span class="fact-kind ${esc(i.kind)}">${esc(kind)}</span>
+      <h3>${esc(title)}</h3>
+      <span class="fact-meta">${esc(i.author_email)} · ${esc(ago(i.created_ts))}${i.area && i.area !== '/' ? ` · ${esc(i.area)}` : ''}</span>
+    </div>
+    <p class="fact-text">${esc(i.text ?? '')}</p>
+    ${i.decisions?.length ? `<ul class="fact-decided">${i.decisions.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}
+    ${i.paths?.length ? `<div class="fact-paths">${i.paths.map((p) => `<a href="#history" data-why="${esc(p)}">${esc(p)}</a>`).join('')}</div>` : ''}
+    ${i.stale ? `<div class="fact-stale">${esc(i.stale)}</div>` : ''}
+  </article>`;
+}
+
+/* ---- history: one file's story, read back from the log ---- */
+/**
+ * The console's `knoot why`. The relay returns every event that names a path
+ * plus the intents and messages of whoever touched it, and this renders them
+ * as sentences in the same words the CLI uses, so a person at a terminal and
+ * a person in a browser are told the same story.
+ */
+let historyPath = '';
+function openHistory(path: string): void {
+  historyPath = path;
+  location.hash = '#history';
+}
+
+function viewHistory(): void {
+  const repos = relayTeam?.repos ?? [];
+  if (!repos.length) { viewNotConnected('History', 'Why a file is the way it is: who took it, who wrote it, who was blocked, and what was said.', 'History is read back from the log, and the log starts with the first connection.'); return; }
+  viewEl.innerHTML = `
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>History</h1>
+          <p>Why a file is the way it is: who set out to change it, who took it and when, who was blocked, who wrote it, and what the team said about it along the way. The same answer <code>knoot why</code> prints.</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>File</h2>
+          ${repoPicker('why-repo')}
+          <form class="why-form" id="why-form">
+            <input class="picker wide" id="why-path" placeholder="Path inside the repository, such as src/auth.js" value="${esc(historyPath)}" autocomplete="off" spellcheck="false">
+            <button class="btn quiet sm" type="submit">Look up</button>
+          </form>
+        </div>
+        <div id="why-body">${historyPath ? '<div class="empty">Loading.</div>' : '<div class="empty">Type a path, or open one from Memory or the live log.</div>'}</div>
+      </div>
+    </div>`;
+
+  const load = async (): Promise<void> => {
+    const body = $('#why-body')!;
+    if (!historyPath) return;
+    body.innerHTML = '<div class="empty">Loading.</div>';
+    try {
+      const [events, mem] = await Promise.all([
+        api<RelayEvent[]>(`/api/events?repo=${encodeURIComponent(currentRepo!)}&path=${encodeURIComponent(historyPath)}&limit=400`),
+        api<MemoryPayload>(`/api/memory?repo=${encodeURIComponent(currentRepo!)}`).catch(() => null),
+      ]);
+      const about = (mem?.readable ? mem.items : []).filter((i) => (i.paths ?? []).some((p) => p === historyPath || historyPath.startsWith(p.replace(/\/?$/, '/'))));
+      body.innerHTML = storyHtml(historyPath, events, about);
+      for (const a of body.querySelectorAll<HTMLAnchorElement>('[data-why]')) {
+        a.addEventListener('click', (ev) => { ev.preventDefault(); historyPath = a.dataset.why!; ($('#why-path') as HTMLInputElement).value = historyPath; void load(); });
+      }
+    } catch (e) {
+      body.innerHTML = `<div class="empty">Could not read the log: ${esc((e as Error).message)}</div>`;
+    }
+  };
+  bindRepoPicker('#why-repo', () => { void load(); });
+  $('#why-form')!.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    historyPath = ($('#why-path') as HTMLInputElement).value.trim().replace(/^\.?\//, '');
+    void load();
+  });
+  void load();
+}
+
+/** One event as a sentence, in the CLI's words. Presence alone is left out. */
+function storyLine(e: RelayEvent & Record<string, unknown>, name: (s: string) => string): { cls: string; text: string } | null {
+  const sess = e.session ?? '';
+  const s = (k: string) => (typeof e[k] === 'string' ? (e[k] as string) : '');
+  switch (e.type) {
+    case 'claim_acquired': return { cls: 'held', text: `${name(sess)} took it${e.intent ? ` — “${e.intent}”` : ''}` };
+    case 'claim_denied': return { cls: 'blocked', text: `${name(sess)} was blocked; ${e.holder_user ?? 'someone'} held it` };
+    case 'claim_released': return { cls: 'plain', text: `${name(sess)} let it go` };
+    case 'file_written': return { cls: 'plain', text: `${name(sess)} wrote it` };
+    case 'path_removed': return { cls: 'warn', text: `${name(sess)} ${e.moved ? 'moved' : 'deleted'} it` };
+    case 'ungated_write': return { cls: 'warn', text: `${name(sess)} wrote it while ${e.holder_user ?? 'someone'} held it (not stopped, only seen)` };
+    case 'cross_branch_overlap': return { cls: 'warn', text: `${name(sess)} touched it on ${e.branch ?? '?'}, ${e.peer_user ?? '?'} on ${s('peer_branch') || '?'} — these meet at merge` };
+    case 'stale_read': return { cls: 'warn', text: `${name(sess)} was working from a stale read of it (${e.peer_user ?? 'someone'} had changed it)` };
+    case 'create_collision': return { cls: 'blocked', text: `${name(sess)} and ${e.peer_user ?? 'someone'} both created it` };
+    case 'path_freed': return { cls: 'wire', text: `freed by ${s('by_user') || 'someone'}` };
+    case 'message': return { cls: 'wire', text: `${s('from_user') || e.user || 'someone'} said: “${e.text ?? ''}”` };
+    case 'intent_declared': return e.text ? { cls: 'plain', text: `${name(sess)} set out to: ${e.text}` } : null;
+    default: return null;
+  }
+}
+
+function storyHtml(path: string, events: RelayEvent[], about: MemoryItem[]): string {
+  const who = new Map<string, string>();
+  const name = (s: string) => who.get(s) ?? (s ? s.slice(0, 8) : 'someone');
+  const lines: string[] = [];
+  for (const e of events) {
+    if (e.user && e.session) who.set(e.session, e.user);
+    const l = storyLine(e as RelayEvent & Record<string, unknown>, name);
+    if (!l) continue;
+    const t = e.ts ? new Date(e.ts).toLocaleString([], { hour12: false, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    lines.push(`<div class="story-row"><span class="t">${esc(t)}</span><span class="k ${l.cls}"></span><span class="d">${esc(l.text)}</span></div>`);
+  }
+  const story = lines.length
+    ? `<div class="story">${lines.join('')}</div>`
+    : `<div class="empty">${events.length ? 'Only presence on the log — nobody has claimed or written it.' : 'Nothing on the log about this file yet.'}</div>`;
+  const known = about.length
+    ? `<div class="panel-body"><div class="lbl">What the team knows about it</div><div class="facts">${about.map(factHtml).join('')}</div></div>`
+    : '';
+  return `<div class="story-path"><code>${esc(path)}</code></div>${story}${known}`;
 }
 
 /* ---- repositories ---- */
@@ -648,7 +872,7 @@ function viewRooms(): void {
       <div class="page-head">
         <div>
           <h1>Rooms</h1>
-          <p>A room decides who can collide with whom. Everyone in a room sees the live claims, the writes and &mdash; when it arrives &mdash; the shared memory of the areas that room holds. Every team starts with one room over everything, which is the right answer until a repository is big enough to be worth splitting.</p>
+          <p>A room decides who can collide with whom. Everyone in a room sees the live claims, the writes and the shared memory of the areas that room holds. Every team starts with one room over everything, which is the right answer until a repository is big enough to be worth splitting.</p>
         </div>
       </div>
 
