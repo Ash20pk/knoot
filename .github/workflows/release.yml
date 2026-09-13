@@ -65,7 +65,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: knoot-aarch64-macos
-          - os: macos-13
+          # Cross-compiled on the Apple silicon runner: Xcode's toolchain
+          # builds both architectures, and GitHub no longer has Intel runners.
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact: knoot-x86_64-macos
     runs-on: ${{ matrix.os }}
@@ -118,7 +120,9 @@ jobs:
             file ${{ matrix.artifact }} | grep -qE "static-pie linked|statically linked" \
               || { echo "binary is not statically linked"; exit 1; }
           fi
-          ./${{ matrix.artifact }} --version
+          # A cross-compiled binary cannot run on the builder; Rosetta is not
+          # installed on the arm64 runners, so only the native ones are run.
+          if [ "${{ matrix.target }}" != "x86_64-apple-darwin" ]; then ./${{ matrix.artifact }} --version; fi
           shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
           cat ${{ matrix.artifact }}.sha256
 
