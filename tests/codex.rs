@@ -431,3 +431,91 @@ async fn init_for_one_agent_touches_only_that_agents_file() {
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(s.contains("/hooks"), "init tells the user Codex needs the hooks trusted once:\n{s}");
 }
+
+// ------------------------------------------------- the sandbox, and a way out
+
+/// Codex runs an agent's own commands in a sandbox that blocks every socket,
+/// so `knoot msg` fails there with EPERM while the hooks — which run outside
+/// it — keep working. Measured live, 13 September 2026: the agent ran the
+/// command the brief told it to, was refused, and concluded knoot was off.
+/// So a Codex brief has to say how to message without a socket.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_codex_brief_says_how_to_message_from_inside_the_sandbox() {
+    let (sock, root, _) = scenario("sandbox-note").await;
+    seed(&root, "src/auth.rs");
+    joins(&sock, &root, "cx-ash", "ash");
+    joins(&sock, &root, "cx-priya", "priya");
+    assert!(!denied(&hook_as(&sock, patch(&root, "cx-ash", "PreToolUse", &update(&["src/auth.rs"])), "ash")));
+
+    // On the denial, the highest-attention surface.
+    let out = hook_as(&sock, patch(&root, "cx-priya", "PreToolUse", &update(&["src/auth.rs"])), "priya");
+    assert!(denied(&out));
+    let why = told(&out);
+    assert!(why.contains(".knoot/outbox/"), "the deny must name the outbox:\n{why}");
+    assert!(why.contains("does not mean knoot is off"), "{why}");
+
+    // And on the turn-start context.
+    let ctx = prompt(&sock, &root, "cx-priya", "priya", "add rate limiting to auth");
+    assert!(ctx.contains(".knoot/outbox/"), "the brief must name the outbox:\n{ctx}");
+
+    // Claude Code is not in that sandbox and is told nothing about it.
+    let mut claude = json!({
+        "hook_event_name": "UserPromptSubmit", "session_id": "cc-sam",
+        "cwd": root.to_string_lossy(), "prompt": "add rate limiting to auth",
+    });
+    claude["source"] = json!("startup");
+    let cc = told(&hook_with(&sock, claude, "sam", Some("claude")));
+    assert!(!cc.contains(".knoot/outbox/"), "Claude Code's shell reaches the daemon:\n{cc}");
+}
+
+/// The way out: a file per recipient under `.knoot/outbox`, sent by the next
+/// hook — any hook — and removed once the relay has it. The agent never has
+/// to reach a socket; the hook does that for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_left_in_the_outbox_is_sent_on_the_next_hook() {
+    let (sock, root, _) = scenario("outbox").await;
+    joins(&sock, &root, "cx-ash", "ash");
+    joins(&sock, &root, "cx-priya", "priya");
+
+    let outbox = root.join(".knoot/outbox");
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::write(outbox.join("priya"), "taking src/auth.rs for ten minutes\n").unwrap();
+    std::fs::write(outbox.join("all.txt"), "  \n").unwrap(); // empty: dropped, never sent
+    std::fs::write(outbox.join(".DS_Store"), "junk").unwrap(); // not a recipient
+
+    // Any hook from the sender's side carries it. A shell read is the least
+    // eventful one there is.
+    hook_as(&sock, bash(&root, "cx-ash", "PostToolUse", "cat README.md"), "ash");
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    assert!(!outbox.join("priya").exists(), "sent messages are removed");
+    assert!(!outbox.join("all.txt").exists(), "an empty file is not a message");
+    assert!(outbox.join(".DS_Store").exists(), "dotfiles are left alone");
+
+    let mut stop = envelope(&root, "cx-priya", "Stop");
+    stop["stop_hook_active"] = json!(false);
+    let out = hook_as(&sock, stop, "priya").expect("the message must reach priya");
+    assert_eq!(out["decision"], "block");
+    let reason = out["reason"].as_str().unwrap();
+    assert!(reason.contains("taking src/auth.rs for ten minutes"), "{reason}");
+    assert!(reason.contains("ash"), "from the sender, not the hook:\n{reason}");
+}
+
+/// `init` keeps the outbox out of the repository, and does not rewrite a
+/// `.gitignore` that already covers it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn init_ignores_the_outbox_once() {
+    let root = tmp("gitignore");
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    for _ in 0..2 {
+        let out = Command::new(BIN)
+            .args(["init", "--relay", "ws://127.0.0.1:1/ws", "--agent", "codex"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let gi = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert_eq!(gi.matches(".knoot/").count(), 1, "added exactly once:\n{gi}");
+    assert!(gi.starts_with("target/\n"), "the existing content is kept:\n{gi}");
+}

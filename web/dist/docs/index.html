@@ -105,6 +105,12 @@ coordination is on.</pre>
       <h3>Claude Code</h3>
       <p><code>knoot init</code> writes the hook configuration for you, into <code>.claude/settings.json</code> in the repository. Restart any sessions that were already open.</p>
 
+      <h3>Codex</h3>
+      <p>The same <code>knoot init</code> also writes <code>.codex/hooks.json</code>. Codex asks you to trust a repository&rsquo;s hooks once: run <code>/hooks</code> inside Codex. Edits arrive as one <code>apply_patch</code> call, so a patch touching several files is checked as a unit and a denial on one file claims none of the others.</p>
+      <div class="callout">
+        <p>Codex runs the agent&rsquo;s own shell commands in a sandbox that blocks every socket, so <code>knoot who</code> and <code>knoot msg</code> fail inside a Codex session with <em>Operation not permitted</em>. Hooks run outside that sandbox and keep working, and the brief Codex receives says so. To message a peer, Codex writes the text to <code>.knoot/outbox/&lt;user&gt;</code>; the next hook sends it and removes the file. <code>init</code> adds <code>.knoot/</code> to <code>.gitignore</code>.</p>
+      </div>
+
       <h3>Any other agent</h3>
       <p>Call the shim yourself before each write and honour the answer. It is the same code path the built-in integration uses.</p>
       <div class="term">

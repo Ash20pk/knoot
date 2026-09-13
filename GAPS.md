@@ -367,11 +367,26 @@ to the same file.
   command the agent runs itself goes through `workspace-write`, which denies
   the connect to `~/.knoot/knootd.sock` because it is outside the workspace.
   Confirmed by rerunning the same `knoot who` under `danger-full-access`,
-  where it printed the session. So today the brief tells Codex to do
-  something Codex cannot do, and then the daemon looks dead. Codex has two
-  config knobs that would open it (`[sandbox_workspace_write] writable_roots`
-  and `network.allow_unix_sockets`), or the daemon can listen at a socket
-  inside the workspace as well. Not fixed yet; the decision is which.
+  where it printed the session. So the brief told Codex to do something Codex
+  could not do, and then the daemon looked dead.
+
+  **Fixed, the same day, after measuring the sandbox rather than guessing at
+  it.** Probes under the real `workspace-write` policy: a unix socket in
+  `/tmp`, one under `~/.knoot`, one inside the repository, and TCP to
+  loopback all fail with EPERM; a file write inside the repository succeeds.
+  Neither of the two fixes first proposed — a socket inside the workspace, or
+  Codex's sandbox config knobs — would have worked, and both were dropped.
+  What works is the one channel the sandbox leaves open: an agent writes a
+  message to `.knoot/outbox/<user>` (or `all`) with its edit tool, and the
+  next hook — which runs outside the sandbox — sends it and removes the file.
+  Three things ride with it: the Codex brief says so, on the denial and at
+  turn start, and says outright that *"Operation not permitted" does not mean
+  knoot is off*; the CLI distinguishes EPERM from a missing socket and stops
+  reporting a healthy daemon as not running; and `init` ignores `.knoot/`.
+  Claude Code's brief carries none of this — its shell reaches the daemon.
+  Tests: `a_codex_brief_says_how_to_message_from_inside_the_sandbox`,
+  `a_message_left_in_the_outbox_is_sent_on_the_next_hook`,
+  `init_ignores_the_outbox_once`.
 - **One thing that is not a bug.** Both sessions are attributed to
   `ash@knoot.local` because both ran under one device key on one laptop; the
   `KNOOT_USER` the harness set is ignored on purpose. The log tells them apart

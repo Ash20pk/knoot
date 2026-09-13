@@ -337,6 +337,8 @@ fn init(relay: String, repo: Option<String>, agent: &str) -> Result<()> {
         });
     }
 
+    ignore_outbox(&root);
+
     println!("knoot enabled for {}", root.display());
     println!("  repo id : {repo_id}");
     println!("  relay   : {relay}");
@@ -365,6 +367,24 @@ fn init(relay: String, repo: Option<String>, agent: &str) -> Result<()> {
     println!("     Each of them needs the binary on PATH, `knoot daemon`, and, on a hosted");
     println!("     relay, `knoot login`.");
     Ok(())
+}
+
+/// `.knoot/` holds the outbox an agent writes messages into when its shell
+/// cannot reach the daemon. It is transport, not content, and must never be
+/// committed — so `init` ignores it, once, without disturbing the rest of the
+/// file.
+fn ignore_outbox(root: &Path) {
+    let path = root.join(".gitignore");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    if current.lines().any(|l| matches!(l.trim(), ".knoot" | ".knoot/" | "/.knoot" | "/.knoot/")) {
+        return;
+    }
+    let mut next = current;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(".knoot/\n");
+    let _ = std::fs::write(&path, next);
 }
 
 /// The events knoot listens on, and the tool matcher for the two that have
@@ -479,7 +499,7 @@ fn msg(to: String, text: String) -> Result<()> {
             println!("sent to {}", to.unwrap_or_else(|| "everyone".into()));
             Ok(())
         }
-        None => anyhow::bail!("knootd not running — start it with `knoot daemon`"),
+        None => anyhow::bail!("{}", hook::unreachable_hint()),
     }
 }
 
@@ -501,7 +521,7 @@ fn inbox(user: Option<String>) -> Result<()> {
             Ok(())
         }
         Some(DResp::Err { msg }) => anyhow::bail!(msg),
-        _ => anyhow::bail!("knootd not running — start it with `knoot daemon`"),
+        _ => anyhow::bail!("{}", hook::unreachable_hint()),
     }
 }
 
@@ -1515,7 +1535,7 @@ fn who() -> Result<()> {
     let root = config::find_repo_root(&std::env::current_dir()?)
         .context("no .knoot.toml found — run `knoot init` first")?;
     let req = DReq::Who { repo_root: root.to_string_lossy().to_string() };
-    let resp = hook::call_daemon(&req).context("knootd not running — start it with `knoot daemon`")?;
+    let resp = hook::call_daemon(&req).with_context(hook::unreachable_hint)?;
     match resp {
         DResp::Peers { sessions, claims, writes, .. } => {
             if sessions.is_empty() {

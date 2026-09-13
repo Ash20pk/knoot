@@ -91,6 +91,10 @@ fn inner(agent: Option<Agent>) {
     let Some(root) = config::find_repo_root(std::path::Path::new(&cwd)) else { return };
     let repo_root = root.to_string_lossy().to_string();
 
+    // Anything the agent left to be sent. Before the request, so a message
+    // written just before a patch travels on the same hook the patch does.
+    flush_outbox(&root);
+
     let tool = v["tool_name"].as_str().unwrap_or("");
     let req = match event {
         // Codex's one editing tool. The payload is the patch itself; only the
@@ -192,6 +196,10 @@ fn inner(agent: Option<Agent>) {
             for n in &notes {
                 why.push('\n');
                 why.push_str(n);
+            }
+            if let Some(note) = sandbox_note(agent) {
+                why.push('\n');
+                why.push_str(note);
             }
             let out = json!({
                 "hookSpecificOutput": {
@@ -403,6 +411,10 @@ fn inner(agent: Option<Agent>) {
                  To tell them what you are about to do, so nobody duplicates it: \
                  knoot plan --path <file> \"what you are doing\"",
             );
+            if let Some(note) = sandbox_note(agent) {
+                ctx.push('\n');
+                ctx.push_str(note);
+            }
 
             let out = json!({
                 "hookSpecificOutput": { "hookEventName": event, "additionalContext": ctx }
@@ -457,6 +469,90 @@ fn git_branch(cwd: &str) -> String {
 
 pub fn call_daemon(req: &DReq) -> Option<DResp> {
     call_daemon_at(&daemon::socket_path(), req)
+}
+
+/// Where an agent that cannot open a socket leaves a message: one file per
+/// recipient under the repo, `all` for everyone.
+pub const OUTBOX_DIR: &str = ".knoot/outbox";
+
+/// Codex runs an agent's own shell commands inside a sandbox that permits
+/// writes in the workspace and nothing on any socket, unix or TCP — measured,
+/// not assumed: `knoot msg` from a live Codex session failed with EPERM and
+/// the agent concluded knoot was off. Hooks run outside that sandbox. So for
+/// Codex the brief says how to do the one thing it would otherwise be told to
+/// do with a command it cannot run.
+///
+/// Claude Code gets nothing here: its shell reaches the daemon, and a note
+/// about a sandbox it is not in would be noise.
+fn sandbox_note(agent: Agent) -> Option<&'static str> {
+    match agent {
+        Agent::Codex => Some(
+            "knoot: your sandbox blocks sockets, so `knoot who` and `knoot msg` fail here \
+             with \"Operation not permitted\" — that does not mean knoot is off. The peers \
+             listed are the full list. To message someone, write the text to \
+             .knoot/outbox/<user> (or .knoot/outbox/all) with your edit tool; it is sent \
+             on your next tool call and the file is removed.",
+        ),
+        Agent::ClaudeCode => None,
+    }
+}
+
+/// Send and remove every message left in the repo's outbox. Best effort and
+/// silent: a hook must never fail, and a message that could not be sent stays
+/// in the file for the next hook to try. Files are the transport, not the
+/// content: a recipient name and a few lines of text, nothing is parsed.
+fn flush_outbox(root: &std::path::Path) {
+    let dir = root.join(OUTBOX_DIR);
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let repo_root = root.to_string_lossy().to_string();
+    for e in entries.flatten() {
+        let path = e.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let to = name.trim_end_matches(".txt").trim_end_matches(".md").trim();
+        if to.is_empty() || to.starts_with('.') {
+            continue;
+        }
+        let Ok(raw) = std::fs::read(&path) else { continue };
+        if raw.len() > 8 * 1024 {
+            // Not a message. Leave it where it is rather than send a file.
+            continue;
+        }
+        let text = String::from_utf8_lossy(&raw).trim().to_string();
+        if text.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+        let req = DReq::Msg {
+            repo_root: repo_root.clone(),
+            from_user: session_user(),
+            to: (!to.eq_ignore_ascii_case("all")).then(|| to.to_string()),
+            text,
+        };
+        match call_daemon(&req) {
+            Some(DResp::Err { .. }) | None => {} // try again on the next hook
+            Some(_) => { let _ = std::fs::remove_file(&path); }
+        }
+    }
+}
+
+/// Why the daemon could not be reached, in the words a person or an agent
+/// needs. "Not running" was the only message, and it was wrong in the one
+/// case that mattered: a sandbox that refuses the connect leaves a perfectly
+/// healthy daemon looking dead.
+pub fn unreachable_hint() -> String {
+    match UnixStream::connect(daemon::socket_path()) {
+        Ok(_) => "knootd did not answer — is it stuck? Restart it with `knoot daemon`".into(),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => format!(
+            "this shell may not open the daemon's socket (Operation not permitted) — you are \
+             in a sandbox, so knootd may well be running. Everything `knoot who` prints is \
+             already in your hook brief. To send a message from here, write it to \
+             {OUTBOX_DIR}/<user>; the next hook delivers it."
+        ),
+        Err(_) => "knootd not running — start it with `knoot daemon`".into(),
+    }
 }
 
 /// Talk to a daemon at an explicit socket path. Returns None on any failure —
