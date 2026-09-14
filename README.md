@@ -186,6 +186,23 @@ Code:
   recorded — for Claude Code too, where auto mode prefers the shell. Only
   paths that exist in the repo are recorded, and a read is advisory; it never
   denies anything.
+- **Codex's sandbox blocks every socket, so messages go through a file.**
+  Codex runs the agent's own shell commands under a policy that permits writes
+  in the workspace and refuses every connect, unix or TCP — measured, not
+  assumed. Hooks run outside it and work; `knoot msg` from inside it fails
+  with *Operation not permitted*, and a live Codex session concluded knoot
+  was off. So the Codex brief says that is not what it means, and says how to
+  message instead: write the text to `.knoot/outbox/<user>` (or `all`) with
+  the edit tool, and the next hook — any hook — sends it and removes the file.
+  `init` adds `.knoot/` to `.gitignore`. The CLI now tells a refused connect
+  from a missing socket, so a healthy daemon is never reported as not running.
+  Claude Code's shell reaches the daemon and its brief carries none of this.
+
+Run live on 13 September 2026 — Codex CLI 0.154 and Claude Code on one file,
+against a real relay — Codex saw the peer from its turn-start brief before it
+was blocked, re-planned on the denial, matched a convention planted in memory,
+and after the fix coordinated through the outbox on the first try. The
+transcript quotes are under gap 8 in [GAPS.md](GAPS.md).
 
 Which agent is calling is stated on the installed command line (`knoot hook
 --agent codex`) and, failing that, inferred from the payload — Codex's carries
@@ -225,6 +242,8 @@ the second column on the bytes the relay stored, not on intent.
 
 ```sh
 cargo build --release            # → target/release/knoot
+# or take a prebuilt one from the nightly release: Linux x86_64 (static),
+# macOS Apple silicon, macOS Intel — put it on PATH as `knoot`
 
 knoot relay --listen 0.0.0.0:7420   # one shared relay (any box, or localhost)
 knoot daemon                        # one per machine
@@ -439,7 +458,8 @@ the relay rejects an untokened request, accepts a tokened one, validates
 registration input, and has a replicable event log.
 
 **It downloads the binary rather than building it.** CI publishes a static
-musl build to the `nightly` release on every push to `main`; the provisioner
+musl build to the `nightly` release on every push to `main` — alongside macOS
+builds for Apple silicon and Intel, so a laptop need not compile; the provisioner
 verifies its checksum and swaps it in only once everything around it is in
 place, so a failed download leaves the running version untouched. A 1 vCPU /
 1 GB box needs a 2 GB swapfile to link this at all, and would be doing it
@@ -474,7 +494,13 @@ nothing and reports success.
 
 The hosted relay has a front end: [knoot.dev](https://knoot.dev) is the site,
 `/docs` the documentation, `/status` a live health check, and `/app` the team
-console — sign in, manage agent tokens, and watch the live event log.
+console. The console opens on one **Get started** flow until a repository has
+reached the relay — five steps, each ticked from what the relay actually knows:
+a live key, a connected repository, a second person — and then on the live
+log. Beside it: **Memory**, what the rooms know about a repository, who wrote
+each entry and whether it has gone stale; **History**, `knoot why` in a
+browser, one file's story in the CLI's own words; and the repositories, keys,
+rooms and team behind them. Every path in the log opens its history.
 
 ```sh
 open https://knoot.dev/app/#signup      # email and password, for a person
@@ -706,7 +732,7 @@ accident. Two runs, unprompted behaviour:
 ## Tests
 
 ```sh
-cargo test          # 300 tests, ~20s
+cargo test          # 306 tests, ~20s
 ```
 
 | Layer | File | What it protects |
@@ -715,11 +741,11 @@ cargo test          # 300 tests, ~20s
 | Memory | `tests/memory.rs` | a fact reaches a peer on the next turn unasked; scoped fetch by id; contradiction is a supersession; a `.env` is refused; a composed context never replaces a declared plan |
 | Encryption | `tests/mls.rs` | a relay dump yields no plaintext, no secret and no working credential; a removed device cannot derive the next epoch |
 | Awareness | `tests/awareness.rs`, `tests/areas.rs` | stale reads, creation collisions, deletions, hubs; one area's events never reach a session outside it |
-| Codex | `tests/codex.rs` | Codex's real payload shapes through the binary; a patch checked as a unit; shell reads count; the transcript and tool output never reach the relay |
+| Codex | `tests/codex.rs` | Codex's real payload shapes through the binary; a patch checked as a unit; shell reads count; the transcript and tool output never reach the relay; the brief names the outbox and a message left there is sent on the next hook |
 | Arbitration | `tests/arbitration.rs` | 400+ concurrent races → exactly one winner; conflict briefs carry holder + intent; repo isolation |
 | Failure | `tests/failure.rs` | fail-open on dead daemon, dead relay, unresponsive relay, malformed input; crash recovery via lease expiry |
 | Contract | `tests/e2e.rs` | real Claude Code hook payloads through the binary; exact deny/context JSON; latency ceiling |
-| Multi-tenancy | `tests/teams_api.rs` | registration, token minting/revocation, and that one team cannot read, list, or revoke another's anything |
+| Multi-tenancy | `tests/teams_api.rs`, `tests/memory.rs` | registration, token minting/revocation, and that one team cannot read, list, or revoke another's anything — including through the console's `/api/memory` |
 | Durability | `tests/failure.rs` | claims and sequence numbers survive a relay restart; the log stays replicable (WAL) |
 
 ## Known gaps
@@ -730,6 +756,13 @@ cargo test          # 300 tests, ~20s
   can be attributed to the wrong session. Observed live before the fix.
 - **Interpreters are only detected, never blocked.** `python3 -c "open(...)"`
   writes first and is recorded second.
+- **Inside Codex's sandbox, knoot's CLI cannot reach the daemon.** Every
+  socket is refused there, so `knoot who` and `knoot msg` fail; hooks, which
+  run outside the sandbox, carry everything `who` would print, and messages
+  go through `.knoot/outbox/`. `knoot plan` and `knoot remember` from inside a
+  Codex session are still commands with no way through; the daemon composes a
+  session's context on its own, so the plan is covered, and a fact has to be
+  written from a shell outside the sandbox.
 - **Same-name sessions share a mailbox.** Mail is keyed by user, so two
   sessions running as the same `KNOOT_USER` both receive its notes.
 - **Fail-open is ambiguous by design.** An allowed edit and an unreachable
