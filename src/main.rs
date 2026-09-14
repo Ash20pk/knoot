@@ -499,7 +499,13 @@ fn msg(to: String, text: String) -> Result<()> {
             println!("sent to {}", to.unwrap_or_else(|| "everyone".into()));
             Ok(())
         }
-        None => anyhow::bail!("{}", hook::unreachable_hint()),
+        None => match hook::spool(&root, &req) {
+            Some(_) => {
+                println!("queued for {} — sent on your next tool call", to.unwrap_or_else(|| "everyone".into()));
+                Ok(())
+            }
+            None => anyhow::bail!("{}", hook::unreachable_hint()),
+        },
     }
 }
 
@@ -952,11 +958,23 @@ fn remember(name: String, paths: Vec<String>, from: Option<PathBuf>, text: Strin
             println!("not published: {msg}");
             Ok(())
         }
-        _ => {
-            println!("knoot: daemon not reachable — nothing published");
-            Ok(())
-        }
+        _ => queued_or_not(&root, &req, &format!("fact `{name}`")),
     }
+}
+
+/// The daemon did not answer. In a sandbox that refuses the socket the
+/// request is queued for the next hook, which runs outside it; anywhere else
+/// nothing would ever send the queue, so the truth is "nothing published".
+fn queued_or_not(root: &Path, req: &DReq, what: &str) -> Result<()> {
+    match hook::spool(root, req) {
+        Some(_) => println!(
+            "queued: {what} is published on your next tool call (this shell cannot reach \
+             the daemon; the hook can). A refusal will be written to {}/*.refused.txt",
+            hook::SPOOL_DIR
+        ),
+        None => println!("knoot: daemon not reachable — nothing published"),
+    }
+    Ok(())
 }
 
 /// `knoot member` — the team's people, from a terminal.
@@ -1451,10 +1469,7 @@ fn plan(paths: Vec<String>, decisions: Vec<String>, text: String) -> Result<()> 
             println!("not published: {msg}");
             Ok(())
         }
-        _ => {
-            println!("knoot: daemon not reachable — nothing published");
-            Ok(())
-        }
+        _ => queued_or_not(&root, &req, "your plan"),
     }
 }
 
@@ -1480,10 +1495,7 @@ fn cache(name: String, paths: Vec<String>, text: String) -> Result<()> {
             println!("not published: {msg}");
             Ok(())
         }
-        _ => {
-            println!("knoot: daemon not reachable — nothing published");
-            Ok(())
-        }
+        _ => queued_or_not(&root, &req, &format!("cache entry `{name}`")),
     }
 }
 

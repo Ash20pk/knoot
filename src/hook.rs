@@ -91,9 +91,12 @@ fn inner(agent: Option<Agent>) {
     let Some(root) = config::find_repo_root(std::path::Path::new(&cwd)) else { return };
     let repo_root = root.to_string_lossy().to_string();
 
-    // Anything the agent left to be sent. Before the request, so a message
-    // written just before a patch travels on the same hook the patch does.
+    // Anything the agent left to be sent — a message it wrote to the outbox,
+    // or a command it ran that could not reach the daemon and queued itself.
+    // Before the request, so a message written just before a patch travels
+    // on the same hook the patch does.
     flush_outbox(&root);
+    flush_spool(&root, &session);
 
     let tool = v["tool_name"].as_str().unwrap_or("");
     let req = match event {
@@ -487,11 +490,13 @@ pub const OUTBOX_DIR: &str = ".knoot/outbox";
 fn sandbox_note(agent: Agent) -> Option<&'static str> {
     match agent {
         Agent::Codex => Some(
-            "knoot: your sandbox blocks sockets, so `knoot who` and `knoot msg` fail here \
-             with \"Operation not permitted\" — that does not mean knoot is off. The peers \
-             listed are the full list. To message someone, write the text to \
-             .knoot/outbox/<user> (or .knoot/outbox/all) with your edit tool; it is sent \
-             on your next tool call and the file is removed.",
+            "knoot: your sandbox blocks sockets, so knoot commands cannot reach the daemon \
+             from here — \"Operation not permitted\" does not mean knoot is off. `knoot msg`, \
+             `knoot plan` and `knoot remember` still work: they queue the request under \
+             .knoot/spool/ and your next tool call sends it. `knoot who` is unnecessary — \
+             the peers listed are the full list. You can also message someone by writing \
+             text to .knoot/outbox/<user> (or all) with your edit tool. If something you \
+             queued was refused, the reason is in .knoot/spool/*.refused.txt.",
         ),
         Agent::ClaudeCode => None,
     }
@@ -538,6 +543,90 @@ fn flush_outbox(root: &std::path::Path) {
     }
 }
 
+/// Where a command that could not reach the daemon leaves its request, as the
+/// JSON it would have sent, for the next hook to send from outside the sandbox.
+pub const SPOOL_DIR: &str = ".knoot/spool";
+
+/// Whether the daemon's socket exists but this process may not open it —
+/// the signature of a sandbox, and the one failure where queueing is right.
+/// A missing socket means no daemon, and nothing would ever send the queue.
+pub fn socket_refused() -> bool {
+    matches!(
+        UnixStream::connect(daemon::socket_path()),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied
+    )
+}
+
+/// Queue a request for the next hook. Returns where it went. `None` when the
+/// daemon is simply not running: then there is nobody to send it, and saying
+/// "queued" would be a lie the agent acts on.
+pub fn spool(repo_root: &std::path::Path, req: &DReq) -> Option<std::path::PathBuf> {
+    if !socket_refused() {
+        return None;
+    }
+    let dir = repo_root.join(SPOOL_DIR);
+    std::fs::create_dir_all(&dir).ok()?;
+    let name = format!(
+        "{}-{}.json",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+        uuid::Uuid::new_v4().simple()
+    );
+    let path = dir.join(name);
+    std::fs::write(&path, serde_json::to_vec(req).ok()?).ok()?;
+    Some(path)
+}
+
+/// Send every queued request, oldest first. A request that names no real
+/// session — the CLI in an agent's shell cannot learn one — is given this
+/// hook's, so a plan queued from inside a Codex turn belongs to that turn. A
+/// refusal is written beside the request as `*.refused.txt`, because the
+/// agent that queued it never saw the daemon's answer and the brief tells it
+/// where to look.
+fn flush_spool(root: &std::path::Path, session: &str) {
+    let dir = root.join(SPOOL_DIR);
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let repo_root = root.to_string_lossy().to_string();
+    for path in files {
+        let Ok(raw) = std::fs::read(&path) else { continue };
+        let Ok(mut req) = serde_json::from_slice::<DReq>(&raw) else {
+            let _ = std::fs::remove_file(&path); // not a request; not ours to keep
+            continue;
+        };
+        match &mut req {
+            DReq::Msg { repo_root: r, .. } => *r = repo_root.clone(),
+            DReq::Remember { repo_root: r, session: s, user, .. }
+            | DReq::Plan { repo_root: r, session: s, user, .. }
+            | DReq::Cache { repo_root: r, session: s, user, .. } => {
+                *r = repo_root.clone();
+                if s.is_empty() || s == user {
+                    *s = session.to_string();
+                }
+            }
+            _ => {
+                let _ = std::fs::remove_file(&path); // only these four may be queued
+                continue;
+            }
+        }
+        match call_daemon(&req) {
+            None => return, // daemon unreachable from here too; keep for next time
+            Some(DResp::Err { msg }) => {
+                let _ = std::fs::write(path.with_extension("refused.txt"), format!("{msg}\n"));
+                let _ = std::fs::remove_file(&path);
+            }
+            Some(_) => { let _ = std::fs::remove_file(&path); }
+        }
+    }
+}
+
 /// Why the daemon could not be reached, in the words a person or an agent
 /// needs. "Not running" was the only message, and it was wrong in the one
 /// case that mattered: a sandbox that refuses the connect leaves a perfectly
@@ -548,8 +637,8 @@ pub fn unreachable_hint() -> String {
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => format!(
             "this shell may not open the daemon's socket (Operation not permitted) — you are \
              in a sandbox, so knootd may well be running. Everything `knoot who` prints is \
-             already in your hook brief. To send a message from here, write it to \
-             {OUTBOX_DIR}/<user>; the next hook delivers it."
+             already in your hook brief. `knoot msg`, `knoot plan` and `knoot remember` \
+             queue themselves under {SPOOL_DIR}/ and your next tool call sends them."
         ),
         Err(_) => "knootd not running — start it with `knoot daemon`".into(),
     }

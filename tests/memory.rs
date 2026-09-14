@@ -909,3 +909,67 @@ async fn the_console_reads_what_the_rooms_know_and_nothing_else() {
     assert_eq!(code, 200, "{j}");
     assert!(j["items"].as_array().is_some_and(|a| a.is_empty()), "another team's memory is not readable: {j}");
 }
+
+// ------------------------------------------------- queued from a sandbox
+
+/// The commands work from inside a sandbox that refuses the daemon's socket.
+/// `remember`, `plan` and `msg` notice the refusal — the socket is there and
+/// may not be opened, which is what a sandbox looks like from the inside —
+/// queue the request under `.knoot/spool`, and say so. The next hook, which
+/// runs outside, sends them, giving the plan the session of the turn that
+/// queued it. A missing socket queues nothing, because nothing would send it.
+#[tokio::test]
+async fn a_command_the_sandbox_refuses_is_queued_and_sent_by_the_next_hook() {
+    use std::os::unix::fs::PermissionsExt;
+    let (c, root, _) = repo("spool").await;
+    std::fs::write(root.join("src/billing.js"), "x\n").unwrap();
+    joins(&c.sock, &root, "s-priya", "priya");
+
+    // Short, or the path exceeds SUN_LEN and connect() fails for the wrong
+    // reason before permissions are even looked at.
+    let jail = PathBuf::from(format!("/tmp/knoot-jail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&jail);
+    std::fs::create_dir_all(&jail).unwrap();
+    std::os::unix::fs::symlink(&c.sock, jail.join("knootd.sock")).unwrap();
+    std::fs::set_permissions(&jail, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let refused = jail.join("knootd.sock");
+
+    let said = remember(&refused, &root, &["--name", "money", "--path", "src/billing.js", "integer cents, never floats"]);
+    assert!(said.contains("queued"), "a refused socket queues the fact:\n{said}");
+    let said = plan(&refused, &root, "priya", &["--path", "src/billing.js", "--decided", "cents", "rounding the tax line"]);
+    assert!(said.contains("queued"), "and the plan:\n{said}");
+    let sent = Command::new(BIN)
+        .args(["msg", "ash", "billing is mine for a bit"])
+        .current_dir(&root)
+        .env("KNOOT_SOCK", &refused)
+        .env("KNOOT_USER", "priya")
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&sent.stdout).contains("queued"), "and a message");
+    std::fs::set_permissions(&jail, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_dir_all(&jail);
+
+    let spool = root.join(".knoot/spool");
+    assert_eq!(std::fs::read_dir(&spool).unwrap().count(), 3, "three requests waiting");
+
+    // Any hook from that session sends them, as that session.
+    reads(&c.sock, &root, "s-priya", "priya", "src/billing.js");
+    settle().await;
+    let left: Vec<_> = std::fs::read_dir(&spool).unwrap().flatten().map(|e| e.path()).collect();
+    assert!(left.iter().all(|p| p.extension().is_none_or(|x| x != "json")), "the spool is emptied once sent: {left:?}");
+    assert!(left.is_empty(), "and nothing was refused: {left:?}");
+
+    let listed = recall(&c.sock, &root);
+    assert!(listed.contains("integer cents, never floats"), "the fact was published:\n{listed}");
+    assert!(listed.contains("rounding the tax line"), "the plan was published:\n{listed}");
+
+    // A peer in the area is told the plan and handed the message.
+    joins(&c.sock, &root, "s-ash", "ash");
+    let ctx = prompt(&c.sock, &root, "s-ash", "ash", "touch billing");
+    assert!(ctx.contains("rounding the tax line"), "the plan reaches a peer:\n{ctx}");
+    assert!(ctx.contains("billing is mine for a bit"), "and the message:\n{ctx}");
+
+    // With no daemon at all nothing is queued: there would be nobody to send it.
+    let said = remember(&root.join("nowhere.sock"), &root, &["--name", "x", "nothing"]);
+    assert!(said.contains("nothing published") && !said.contains("queued"), "{said}");
+}

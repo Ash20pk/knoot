@@ -14,7 +14,7 @@ is that snapshot; the addendum at the top is 13 September._
 > agents in a sandbox now message through `.knoot/outbox/<user>`, sent by the
 > next hook, and the CLI no longer calls a healthy daemon "not running".
 > Receipts for all of it are under gaps 5, 7 and 8 in GAPS.md. Test count is
-> now 306 across 12 binaries; the table below is still the 2 September one.
+> now 308 across 12 binaries; the table below is still the 2 September one.
 
 Realtime coordination for coding agents. Multiple Claude Code sessions work one
 repo without overwriting each other, and — the part that makes it multiplayer

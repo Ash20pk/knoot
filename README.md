@@ -194,8 +194,11 @@ Code:
   was off. So the Codex brief says that is not what it means, and says how to
   message instead: write the text to `.knoot/outbox/<user>` (or `all`) with
   the edit tool, and the next hook — any hook — sends it and removes the file.
-  `init` adds `.knoot/` to `.gitignore`. The CLI now tells a refused connect
-  from a missing socket, so a healthy daemon is never reported as not running.
+  `init` adds `.knoot/` to `.gitignore`. The commands work too: `knoot msg`,
+  `knoot plan` and `knoot remember` tell a refused connect from a missing
+  socket, queue the request under `.knoot/spool/` in the first case, and the
+  next hook sends it — so a healthy daemon is never reported as not running,
+  and a fact an agent wanted to publish is published.
   Claude Code's shell reaches the daemon and its brief carries none of this.
 
 Run live on 13 September 2026 — Codex CLI 0.154 and Claude Code on one file,
@@ -732,7 +735,7 @@ accident. Two runs, unprompted behaviour:
 ## Tests
 
 ```sh
-cargo test          # 306 tests, ~20s
+cargo test          # 308 tests, ~20s
 ```
 
 | Layer | File | What it protects |
@@ -756,13 +759,14 @@ cargo test          # 306 tests, ~20s
   can be attributed to the wrong session. Observed live before the fix.
 - **Interpreters are only detected, never blocked.** `python3 -c "open(...)"`
   writes first and is recorded second.
-- **Inside Codex's sandbox, knoot's CLI cannot reach the daemon.** Every
-  socket is refused there, so `knoot who` and `knoot msg` fail; hooks, which
-  run outside the sandbox, carry everything `who` would print, and messages
-  go through `.knoot/outbox/`. `knoot plan` and `knoot remember` from inside a
-  Codex session are still commands with no way through; the daemon composes a
-  session's context on its own, so the plan is covered, and a fact has to be
-  written from a shell outside the sandbox.
+- **Inside Codex's sandbox, knoot's CLI cannot reach the daemon directly.**
+  Every socket is refused there. Hooks, which run outside the sandbox, carry
+  everything `knoot who` would print; `knoot msg`, `knoot plan` and `knoot
+  remember` notice the refused socket, queue the request under `.knoot/spool/`,
+  and the next hook sends it — a plan as the session of the turn that queued
+  it. A refusal is written beside the request as `*.refused.txt`. What does
+  not work from inside is anything that needs an answer now: `knoot who`,
+  `knoot recall`, `knoot why`, `knoot status`.
 - **Same-name sessions share a mailbox.** Mail is keyed by user, so two
   sessions running as the same `KNOOT_USER` both receive its notes.
 - **Fail-open is ambiguous by design.** An allowed edit and an unreachable

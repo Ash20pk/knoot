@@ -519,3 +519,27 @@ async fn init_ignores_the_outbox_once() {
     assert_eq!(gi.matches(".knoot/").count(), 1, "added exactly once:\n{gi}");
     assert!(gi.starts_with("target/\n"), "the existing content is kept:\n{gi}");
 }
+
+/// A queued fact the daemon refuses is not lost silently: the reason lands
+/// beside it, where the brief says to look.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_queued_fact_leaves_its_reason_behind() {
+    let (sock, root, _) = scenario("spool-refused").await;
+    joins(&sock, &root, "cx-priya", "priya");
+    let spool = root.join(".knoot/spool");
+    std::fs::create_dir_all(&spool).unwrap();
+    // `.env` is refused by name: a secret in a shared store is the one thing
+    // memory must never hold.
+    std::fs::write(root.join(".env"), "TOKEN=abc\n").unwrap();
+    let req = json!({
+        "cmd": "remember", "repo_root": "x", "session": "priya", "user": "priya",
+        "name": "leak", "text": "", "paths": [".env"], "from": ".env",
+    });
+    std::fs::write(spool.join("1-a.json"), req.to_string()).unwrap();
+
+    hook_as(&sock, bash(&root, "cx-priya", "PostToolUse", "ls"), "priya");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!spool.join("1-a.json").exists());
+    let why = std::fs::read_to_string(spool.join("1-a.refused.txt")).expect("the reason is written beside it");
+    assert!(!why.trim().is_empty(), "{why}");
+}

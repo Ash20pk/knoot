@@ -397,6 +397,20 @@ to the same file.
   Tests: `a_codex_brief_says_how_to_message_from_inside_the_sandbox`,
   `a_message_left_in_the_outbox_is_sent_on_the_next_hook`,
   `init_ignores_the_outbox_once`.
+
+  *14 September.* The outbox covered messages and left `knoot remember` and
+  `knoot plan` as commands with no way through. Now the commands themselves
+  work from inside: when the socket exists but is refused — the sandbox's
+  signature; a missing socket queues nothing, because nothing would send it —
+  `msg`, `plan`, `remember` and `cache` write the request they would have
+  sent under `.knoot/spool/`, say so, and the next hook sends it from outside,
+  giving a plan the session of the turn that queued it. A daemon refusal is
+  written beside the request as `*.refused.txt`, and the brief says where to
+  look. What still cannot work inside is anything that needs an answer now —
+  `who`, `recall`, `why`, `status` — and the brief already carries what those
+  would print. Tests:
+  `a_command_the_sandbox_refuses_is_queued_and_sent_by_the_next_hook`,
+  `a_refused_queued_fact_leaves_its_reason_behind`.
 - **One thing that is not a bug.** Both sessions are attributed to
   `ash@knoot.local` because both ran under one device key on one laptop; the
   `KNOOT_USER` the harness set is ignored on purpose. The log tells them apart
