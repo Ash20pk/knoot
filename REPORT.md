@@ -1,6 +1,20 @@
 # knoot — state of the project
 
-_As of 2 September 2026. Ten commits, `2b4dd0e`..`346ab0f`._
+_As of 2 September 2026. Ten commits, `2b4dd0e`..`346ab0f`. The body below
+is that snapshot; the addendum at the top is 13 September._
+
+> **Addendum, 13 September 2026 (`ebdb18e`..`492239c`).** Hosted at
+> `knoot.dev` behind TLS, rebuilt from a three-platform nightly (Linux static,
+> macOS arm64 and x86_64). The console opens on a Get-started flow ticked from
+> relay state, has Memory and History tabs over a new `GET /api/memory` and
+> the existing events query, completes a password reset, and holds together
+> on a phone. The front end typechecks in CI. The live Codex arm owed since
+> the 6th has run: Codex read the brief, re-planned on a denial, matched a
+> planted convention, and exposed that its sandbox blocks every socket — so
+> agents in a sandbox now message through `.knoot/outbox/<user>`, sent by the
+> next hook, and the CLI no longer calls a healthy daemon "not running".
+> Receipts for all of it are under gaps 5, 7 and 8 in GAPS.md. Test count is
+> now 306 across 12 binaries; the table below is still the 2 September one.
 
 Realtime coordination for coding agents. Multiple Claude Code sessions work one
 repo without overwriting each other, and — the part that makes it multiplayer

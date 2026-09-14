@@ -176,9 +176,14 @@ The path is matched as a whole JSON value, so asking about `src/a.rs` does not
 return `src/a.rs.bak`'s history, and the team namespacing on the repo key holds
 here like everywhere else.
 
-**Left.** Nothing for a person at a terminal. The same query is the substrate
-for the console view and for anything enterprise wants later — visibility,
-policy, spend attribution — and none of that is built.
+**Left.** ~~Nothing for a person at a terminal.~~ The console now has it, 13
+September 2026: a **History** tab that is `knoot why` in a browser — the same
+sentences, from the same query — and a **Memory** tab that lists what the
+rooms know, who wrote each entry, what it names and whether it has gone stale,
+served by a new `GET /api/memory` that opens shards where the provider lets
+the relay open them and says so where it cannot. Every path in the live log
+and in a fact opens its history. Enterprise's version of the same query —
+policy, spend attribution — is still not built, and still waits for a buyer.
 
 ### 6. Fail-open is a footnote — CLOSED
 
@@ -209,8 +214,13 @@ Startup prints whether auth is on, and says so loudly when an open relay is
 bound off-loopback. A rejected token fails open, with one line on stderr
 naming the fix: an operator's mistake cannot become the team's outage.
 
-**Left.** TLS termination is a proxy's job today, and nothing is deployed
-anywhere yet. The other two are done: a key is a **device** belonging to a
+**Left.** ~~TLS termination is a proxy's job today, and nothing is deployed
+anywhere yet.~~ Deployed: `knoot.dev` runs the relay behind Caddy with TLS,
+rebuilt from a nightly the release workflow now cuts for Linux, macOS Apple
+silicon and macOS Intel (13 September 2026). The console opens on one
+Get-started flow whose steps are ticked from what the relay knows, a reset
+link lands on a page that asks for the new password, and the front end
+typechecks in CI. The other two are done: a key is a **device** belonging to a
 **member**, so authorship, room membership and memory provenance all resolve to
 a person and one laptop can be revoked without touching another; and under the
 `mls` provider a room's key rotates on every membership change, which is token
@@ -451,6 +461,14 @@ rests on, so validation still comes before any further building._
 6. If yes: one design-partner team, one week, read `claim_denied`,
    `cross_branch_overlap` and `ungated_write` — and now also whether anybody
    ran `knoot plan`, because on cheap models nobody did.
+
+_13 September 2026._ Everything that stood between a team and that week on
+the product side has shipped: the console is a front door rather than six
+tabs, memory and history are visible in it, prebuilt binaries exist for the
+laptops agents actually run on, and the live Codex arm has been run — which
+found and closed the sandbox defect under gap 8. What has not moved is item
+5. Nothing here substitutes for the interviews, and this document should not
+grow another section until they have happened.
 
 ~~**One thing to fix before that week, found by the run:** publishing session
 context is a *command*, and no Haiku agent ran it despite being told to.~~
