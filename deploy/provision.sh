@@ -291,8 +291,23 @@ systemctl start knoot-snapshot.timer
 say "caddy"
 # Order matters: the longer name is substituted first, or `relay.knoot.dev`
 # would be rewritten to `relay.<apex>` by the second rule.
-sed -e "s/relay\.knoot\.dev/$DOMAIN/g" -e "s/knoot\.dev/$APEX/g" \
-	"$HERE/Caddyfile" > /etc/caddy/Caddyfile
+# Neon Auth is proxied from the apex so its session cookie is first-party.
+# The upstream comes from the same file the relay reads; without it the block
+# is dropped and sign-in stays off, as it does for the relay.
+neon_auth="$(sed -n 's/^NEON_AUTH_URL=//p' /etc/knoot/neon.env 2>/dev/null || true)"
+if [[ -n "$neon_auth" ]]; then
+	neon_origin="$(printf '%s' "$neon_auth" | sed -E 's#^(https://[^/]+).*#\1#')"
+	neon_path="${neon_auth#"$neon_origin"}"
+	neon_path="${neon_path%/}"
+	sed -e "s/relay\.knoot\.dev/$DOMAIN/g" -e "s/knoot\.dev/$APEX/g" \
+		-e "s#NEON_AUTH_ORIGIN#$neon_origin#" -e "s#NEON_AUTH_PATH#$neon_path#" \
+		"$HERE/Caddyfile" > /etc/caddy/Caddyfile
+	echo "   /neon-auth -> $neon_origin$neon_path"
+else
+	sed -e "s/relay\.knoot\.dev/$DOMAIN/g" -e "s/knoot\.dev/$APEX/g" \
+		-e '/# neon-auth:begin/,/# neon-auth:end/d' \
+		"$HERE/Caddyfile" > /etc/caddy/Caddyfile
+fi
 caddy fmt --overwrite /etc/caddy/Caddyfile 2>/dev/null || true
 caddy validate --config /etc/caddy/Caddyfile 2>&1 | tail -3
 systemctl reload caddy || systemctl restart caddy

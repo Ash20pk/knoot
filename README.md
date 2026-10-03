@@ -579,11 +579,15 @@ in against Neon Auth, the Data API answers only what row-level security allows
 the signed-in person, and the relay checks the same JWT against Neon Auth's
 published keys. There is no service key anywhere.
 
+The browser reaches Neon Auth at `/neon-auth` on the site's own origin — Caddy
+in production, the Vite proxy in development — so the session cookie is
+first-party and survives browsers that block third-party cookies.
+
 | Where | What goes there | Why |
 |---|---|---|
-| `web/.env` (gitignored) | `VITE_NEON_AUTH_URL`, `VITE_NEON_DATA_API_URL` | Local development; Vite reads it at build time |
-| GitHub Actions variables | `NEON_AUTH_URL`, `NEON_DATA_API_URL` | Baked into the released binary's front end |
-| `/etc/knoot/neon.env` on the relay host | `NEON_AUTH_URL`, `NEON_DATA_API_URL` | The relay verifies sign-in and resolves team membership at run time |
+| `web/.env` (gitignored) | `VITE_NEON_AUTH_URL=/neon-auth`, `NEON_AUTH_UPSTREAM`, `VITE_NEON_DATA_API_URL` | Local development; the dev proxy forwards `/neon-auth` to the upstream |
+| GitHub Actions variables | `NEON_AUTH_URL=/neon-auth`, `NEON_DATA_API_URL` | Baked into the released binary's front end |
+| `/etc/knoot/neon.env` on the relay host | `NEON_AUTH_URL` (the real Neon Auth URL), `NEON_DATA_API_URL` | The relay verifies sign-in and resolves team membership; the provisioner points Caddy's `/neon-auth` at the same URL |
 
 | Variable | Read by | Effect |
 |---|---|---|

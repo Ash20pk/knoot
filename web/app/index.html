@@ -60,24 +60,43 @@ sam     <span class="d">-</span>                              51s ago
 <!-- Signed in -->
 <div class="shell" id="shell" hidden>
   <header class="topbar">
-    <a class="brand" href="/">knoot</a>
-    <span class="team-name" id="team-name"></span>
-    <nav class="tabs" id="tabs">
+    <div class="bar">
+      <a class="brand" href="/">knoot</a>
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <span class="team-name" id="team-name"></span>
+      <div class="topright">
+        <a class="toplink" href="/docs/">Docs</a>
+        <div class="account" id="account">
+          <button class="account-btn" id="account-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu">
+            <span class="avatar" id="who-initial" aria-hidden="true"></span>
+            <span class="who" id="who-email"></span>
+            <span class="caret" aria-hidden="true"></span>
+          </button>
+          <div class="account-menu" id="account-menu" role="menu" hidden>
+            <div class="account-head">
+              <span class="account-label">Signed in as</span>
+              <span class="account-email" id="who-email-full"></span>
+            </div>
+            <a href="#settings" role="menuitem">Settings</a>
+            <a href="/docs/" role="menuitem">Docs</a>
+            <button class="account-out" id="signout" type="button" role="menuitem">Sign out</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Console">
       <a href="#start" id="tab-start">Get started</a>
+      <span class="tab-sep" aria-hidden="true"></span>
       <a href="#sessions">Sessions</a>
       <a href="#memory">Memory</a>
       <a href="#history">History</a>
       <a href="#repositories">Repositories</a>
+      <span class="tab-sep" aria-hidden="true"></span>
       <a href="#tokens">Agent keys</a>
       <a href="#rooms">Rooms</a>
       <a href="#team">Team</a>
       <a href="#settings">Settings</a>
     </nav>
-    <div class="topright">
-      <a href="/docs/">Docs</a>
-      <span class="who" id="who-email"></span>
-      <button class="linkish" id="signout">Sign out</button>
-    </div>
   </header>
 
   <main id="view"></main>

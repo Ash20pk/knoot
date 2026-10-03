@@ -6,18 +6,34 @@
 # CORS to configure.
 knoot.dev, www.knoot.dev {
 	encode zstd gzip
-	reverse_proxy 127.0.0.1:7420 {
-		transport http {
-			read_timeout 0
-			write_timeout 0
+
+	# neon-auth:begin
+	# Neon Auth, served from this origin. The session cookie it sets is then
+	# first-party, so no browser's third-party cookie rules can sign someone
+	# out between the console and the rest of the site. provision.sh fills in
+	# the upstream from /etc/knoot/neon.env, or drops this block without one.
+	handle_path /neon-auth/* {
+		rewrite * NEON_AUTH_PATH{uri}
+		reverse_proxy NEON_AUTH_ORIGIN {
+			header_up Host {upstream_hostport}
+		}
+	}
+	# neon-auth:end
+
+	handle {
+		reverse_proxy 127.0.0.1:7420 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
 		}
 	}
 
 	header {
 		# Every script is bundled and served from here (three.js and xterm
 		# included); only fonts come from elsewhere. `connect-src` covers the
-		# relay's own websocket, and the console's sign-in and team reads against
-		# Neon Auth and the Neon Data API.
+		# relay's own websocket and Neon Auth (both this origin), and the
+		# console's team reads against the Neon Data API.
 		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' wss://knoot.dev wss://relay.knoot.dev https://*.neon.tech; frame-ancestors 'none'; base-uri 'none'"
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer

@@ -9,9 +9,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/site-CuGbA7Y8.js"></script>
+  <script type="module" crossorigin src="/assets/site-D4HP3AjL.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-P2Xu9kJm.js">
-  <link rel="modulepreload" crossorigin href="/assets/relay-BZTlOxNI.js">
+  <link rel="modulepreload" crossorigin href="/assets/account-BsuVlu5Z.js">
   <link rel="stylesheet" crossorigin href="/assets/site-BMxzmgB5.css">
 </head>
 <body class="mx">
@@ -29,8 +29,8 @@
       <a href="https://github.com/Ash20pk/knoot">github</a>
     </nav>
     <div class="mx-right">
-      <a href="/app/">sign in</a>
-      <a class="mx-btn sm" href="/app/#signup">start free</a>
+      <a href="/app/" data-auth="signin">sign in</a>
+      <a class="mx-btn sm" href="/app/#signup" data-auth="cta" data-signed-in="open console">start free</a>
     </div>
   </div>
 </header>
@@ -60,7 +60,7 @@
     </div>
 
     <div class="mx-actions">
-      <a class="mx-btn" href="/app/#signup">start free</a>
+      <a class="mx-btn" href="/app/#signup" data-auth="cta" data-signed-in="open console">start free</a>
       <a class="mx-btn ghost" href="/docs/">read the docs</a>
     </div>
   </div>
@@ -288,7 +288,7 @@ instead and come back to auth.js.</span>
       <button class="copy" type="button">copy</button>
     </div>
     <div class="mx-actions">
-      <a class="mx-btn" href="/app/#signup">start free</a>
+      <a class="mx-btn" href="/app/#signup" data-auth="cta" data-signed-in="open console">start free</a>
       <a class="mx-btn ghost" href="https://github.com/Ash20pk/knoot">view source</a>
     </div>
   </div>

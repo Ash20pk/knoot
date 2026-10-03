@@ -45,29 +45,80 @@
 @media (max-width: 900px) { .auth { grid-template-columns: 1fr; } .auth-aside { display: none; } }
 
 /* ---------- shell ---------- */
+/* Two rows, one sticky header. The top row says where you are — knoot, then
+   the team — and who you are; the second row is the sections, grouped as
+   setup, what the agents are doing, and who may do it. */
 .topbar {
-  display: flex; align-items: center; gap: 20px; height: 54px; padding: 0 20px;
-  border-bottom: 1px solid var(--panel-rule); background: var(--panel);
   position: sticky; top: 0; z-index: 20;
+  background: var(--panel); border-bottom: 1px solid var(--panel-rule);
 }
-.topbar .brand { font-size: 17px; font-weight: 600; text-decoration: none; }
-.team-name { font-size: 14px; color: var(--panel-dim); padding-left: 14px; border-left: 1px solid var(--panel-rule); }
-.tabs { display: flex; gap: 4px; margin-left: 14px; }
+.bar { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 20px; min-width: 0; }
+.topbar .brand {
+  font-size: 17px; font-weight: 700; text-decoration: none; color: var(--green);
+  text-shadow: 0 0 8px rgba(0, 255, 65, .35); flex: none;
+}
+.crumb-sep { color: var(--panel-rule); font-size: 18px; flex: none; }
+.team-name {
+  font-size: 14px; color: var(--panel-text); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.topright { margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 14px; flex: none; }
+.toplink { color: var(--panel-dim); text-decoration: none; }
+.toplink:hover { color: var(--panel-text); }
+
+.account { position: relative; }
+.account-btn {
+  display: flex; align-items: center; gap: 9px; max-width: 260px;
+  background: transparent; border: 1px solid var(--panel-rule); border-radius: 3px;
+  padding: 4px 10px 4px 4px; cursor: pointer;
+  font: 13px var(--mono); color: var(--panel-dim);
+}
+.account-btn:hover, .account-btn[aria-expanded="true"] { border-color: var(--panel-dim); color: var(--panel-text); }
+.avatar {
+  flex: none; width: 24px; height: 24px; border-radius: 2px; display: grid; place-items: center;
+  background: var(--panel-2); color: var(--green); font-weight: 700; font-size: 12px; text-transform: uppercase;
+}
+.account-btn .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret { flex: none; width: 0; height: 0; border: 4px solid transparent; border-top-color: currentColor; margin-top: 4px; }
+.account-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 240px; z-index: 30;
+  background: var(--panel); border: 1px solid var(--panel-rule); border-radius: 3px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .6); padding: 6px; display: grid;
+}
+.account-menu[hidden] { display: none; }
+.account-head { display: grid; gap: 3px; padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--panel-rule); }
+.account-label { font-size: 11.5px; color: var(--panel-dim); text-transform: uppercase; letter-spacing: .06em; }
+.account-email { font-size: 13.5px; color: var(--panel-text); overflow-wrap: anywhere; }
+.account-menu a, .account-out {
+  display: block; text-align: left; padding: 8px 10px; border-radius: 2px; border: 0; background: none;
+  font: 14px var(--mono); color: var(--panel-dim); text-decoration: none; cursor: pointer;
+}
+.account-menu a:hover, .account-out:hover, .account-menu a:focus-visible, .account-out:focus-visible {
+  background: var(--panel-2); color: var(--panel-text); outline: none;
+}
+.account-out { color: var(--blocked); }
+.account-out:hover { color: var(--blocked); }
+
+.tabs {
+  display: flex; align-items: stretch; gap: 2px; padding: 0 12px; height: 42px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
 .tabs a {
-  text-decoration: none; color: var(--panel-dim); font-size: 14.5px;
-  padding: 6px 11px; border-radius: 3px; white-space: nowrap;
+  display: flex; align-items: center; text-decoration: none; white-space: nowrap;
+  color: var(--panel-dim); font-size: 14px; padding: 0 10px;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tabs a:hover { color: var(--panel-text); }
-.tabs a.on { color: var(--panel-text); background: var(--panel-2); }
-.topright { margin-left: auto; display: flex; align-items: center; gap: 18px; font-size: 14px; }
-.topright a { color: var(--panel-dim); text-decoration: none; }
-.topright a:hover { color: var(--panel-text); }
-.topright .who { color: var(--panel-dim); }
-@media (max-width: 900px) {
-  .topbar { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 12px; }
-  .tabs { order: 3; width: 100%; margin: 0; overflow-x: auto; scrollbar-width: none; }
-  .tabs::-webkit-scrollbar { display: none; }
-  .topright .who { display: none; }
+.tabs a.on { color: var(--green); border-bottom-color: var(--green); text-shadow: 0 0 8px rgba(0, 255, 65, .35); }
+.tab-sep { flex: none; width: 1px; margin: 12px 8px; background: var(--panel-rule); }
+
+@media (max-width: 760px) {
+  .bar { padding: 0 14px; }
+  .toplink { display: none; }
+  .account-btn { padding: 4px; }
+  .account-btn .who, .caret { display: none; }
+  .tabs { padding: 0 6px; }
 }
 
 /* ---------- page furniture ---------- */

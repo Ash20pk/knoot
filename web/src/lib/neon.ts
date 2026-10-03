@@ -1,4 +1,5 @@
 import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
+import { authUrl } from './auth-url';
 
 /**
  * Neon holds identity and the team records: who you are, which team you
@@ -6,7 +7,7 @@ import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
  * because that is the thing that has to survive without a network.
  *
  * Both URLs are injected at build time and both are public: the auth URL is
- * where the browser signs in, and everything the Data API URL can reach is
+ * where the browser signs in (same-origin on hosted builds; see `auth-url`), and everything the Data API URL can reach is
  * behind row-level security keyed on the signed-in person's JWT. There is no
  * key to leak. A build without them still serves every page; the console just
  * explains that sign-in is not configured rather than throwing on load.
@@ -15,7 +16,7 @@ import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
  * against. Password changes are the exception — see `setNewPassword` and
  * `changePassword` below.
  */
-const AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL as string | undefined;
+const AUTH_URL = authUrl();
 const DATA_API_URL = import.meta.env.VITE_NEON_DATA_API_URL as string | undefined;
 
 export const configured = Boolean(AUTH_URL && DATA_API_URL);

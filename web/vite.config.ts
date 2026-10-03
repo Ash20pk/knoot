@@ -1,7 +1,13 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { resolve } from 'node:path';
 
 const here = import.meta.dirname;
+
+// The branch's Neon Auth, which `/neon-auth` is forwarded to in development the
+// way Caddy forwards it in production, so the session cookie is first-party
+// here too. Not a VITE_ variable: it never reaches the bundle.
+const upstream = loadEnv('development', here, '').NEON_AUTH_UPSTREAM;
+const neonAuth = upstream ? new URL(upstream) : null;
 
 // Multi-page build. Each entry becomes a directory in dist/, which the relay
 // serves from an embedded copy — so there is still one binary and no CORS.
@@ -26,6 +32,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      ...(neonAuth && {
+        '/neon-auth': {
+          target: neonAuth.origin,
+          changeOrigin: true,
+          rewrite: (p: string) => neonAuth.pathname.replace(/\/$/, '') + p.slice('/neon-auth'.length),
+        },
+      }),
       '/api': 'http://127.0.0.1:7499',
       '/ws': { target: 'ws://127.0.0.1:7499', ws: true },
       '/term': { target: 'ws://127.0.0.1:7499', ws: true },

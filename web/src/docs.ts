@@ -1,4 +1,7 @@
 import { RELAY_WS, wireCopyButtons } from './lib/relay';
+import { paintSiteNav } from './lib/account';
+
+void paintSiteNav();
 
 const line = document.querySelector('#relay-line');
 if (line) line.textContent = `relay ${RELAY_WS}`;

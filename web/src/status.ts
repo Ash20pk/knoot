@@ -1,4 +1,7 @@
 import { RELAY_WS, esc, WS_SCHEME } from './lib/relay';
+import { paintSiteNav } from './lib/account';
+
+void paintSiteNav();
 
 type Verdict = 'up' | 'down' | 'part';
 type Check = { name: string; note: string; run: () => Promise<{ verdict: Verdict; detail: string }> };

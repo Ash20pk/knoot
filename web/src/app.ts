@@ -5,6 +5,7 @@ import {
   configured, neon, loadTeam, createTeam, inviteMember, listInvites, revokeInvite,
   acceptInvite, removeTeamMember, setNewPassword, changePassword, type Team, type Invite,
 } from './lib/neon';
+import { rememberSignedIn, forgetSignedIn } from './lib/account';
 
 const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T | null =>
   root.querySelector<T>(sel);
@@ -182,9 +183,24 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
   }
 });
 
+/* The account menu: who you are, settings, sign out. */
+const accountBtn = $('#account-btn') as HTMLButtonElement;
+const accountMenu = $('#account-menu') as HTMLElement;
+const setMenu = (open: boolean): void => {
+  accountMenu.hidden = !open;
+  accountBtn.setAttribute('aria-expanded', String(open));
+};
+accountBtn.addEventListener('click', (e) => { e.stopPropagation(); setMenu(accountMenu.hidden); });
+accountMenu.addEventListener('click', (e) => { if ((e.target as Element).closest('a, button')) setMenu(false); });
+document.addEventListener('click', (e) => { if (!$('#account')!.contains(e.target as Node)) setMenu(false); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !accountMenu.hidden) { setMenu(false); accountBtn.focus(); }
+});
+
 $('#signout')!.addEventListener('click', async () => {
   live?.close();
   await neon?.auth.signOut();
+  forgetSignedIn();
   team = null;
   location.hash = '';
   showAuth();
@@ -212,7 +228,14 @@ function route(): Route {
 function paintTabs(): void {
   const r = route();
   for (const a of document.querySelectorAll<HTMLAnchorElement>('.tabs a')) {
-    a.classList.toggle('on', a.getAttribute('href') === `#${r}`);
+    const on = a.getAttribute('href') === `#${r}`;
+    a.classList.toggle('on', on);
+  }
+  // On a phone the row scrolls sideways; keep the section you are in on screen.
+  const tabs = $('#tabs') as HTMLElement;
+  const on = tabs.querySelector<HTMLElement>('a.on');
+  if (on && (on.offsetLeft < tabs.scrollLeft || on.offsetLeft + on.offsetWidth > tabs.scrollLeft + tabs.clientWidth)) {
+    tabs.scrollLeft = on.offsetLeft - (tabs.clientWidth - on.offsetWidth) / 2;
   }
   $('#tab-start')?.classList.toggle('done', progress().current === 0);
 }
@@ -1345,6 +1368,7 @@ async function boot(): Promise<void> {
   if (mode === 'recover') { showAuth(); ($('#auth-password') as HTMLInputElement).focus(); return; }
   const { data } = await neon!.auth.getSession();
   if (!data.session) {
+    forgetSignedIn();
     stashInvite();
     showAuth();
     if (resetFailed) authMessage('err', 'That reset link has expired or was already used. Choose Forgot password for a new one.');
@@ -1385,7 +1409,11 @@ async function boot(): Promise<void> {
   }
 
   $('#team-name')!.textContent = team!.name;
-  $('#who-email')!.textContent = data.session.user.email ?? '';
+  const email = data.session.user.email ?? '';
+  $('#who-email')!.textContent = email;
+  $('#who-email-full')!.textContent = email;
+  $('#who-initial')!.textContent = email.slice(0, 1);
+  rememberSignedIn(email);
   bootEl.hidden = true;
   shellEl.hidden = false;
   render();
