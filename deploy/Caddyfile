@@ -16,6 +16,8 @@ knoot.dev, www.knoot.dev {
 		rewrite * NEON_AUTH_PATH{uri}
 		reverse_proxy NEON_AUTH_ORIGIN {
 			header_up Host {upstream_hostport}
+			# Neon's edge refuses a forwarded host that is not its own.
+			header_up -X-Forwarded-Host
 		}
 	}
 	# neon-auth:end
