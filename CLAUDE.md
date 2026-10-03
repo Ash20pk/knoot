@@ -35,11 +35,14 @@ so `web/dist` is committed. After any change under `web/`, run
 Never commit a `dist` built from `web/.env`; `build:oss` points Vite at an
 empty env directory for that reason.
 
-Visual system: paper `#f1f2ef` for the site, dark instrument panel `#171c21`
-for the console, ops, lab and status. Instrument Sans for text, Geist Mono for
-log content only. Colour means state: green held, orange blocked, blue message,
-amber warning. No gradients, glows, cards-on-cards, all-caps eyebrows, arrows
-on buttons, or illustrations.
+Visual system, homepage (`web/index.html`, `src/styles/matrix.css`): the
+Matrix — black phosphor screen, green type, JetBrains Mono at every size, a
+soft glow on headings and primary buttons, katakana digital rain behind the
+hero, faint scanlines. Colour still means state: green `#00ff41` held, red
+pill `#ff3b3b` blocked, blue pill `#3fa9ff` message, amber `#ffd23f` warning.
+The docs, console, ops, lab and status pages still use the earlier system in
+`tokens.css` (paper `#f1f2ef`, instrument panel `#171c21`, Instrument Sans)
+until they are moved over.
 
 ## Deploy
 

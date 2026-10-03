@@ -15,17 +15,18 @@ import {
   Line, LineBasicMaterial, Mesh, MeshStandardMaterial, Object3D,
   OrthographicCamera, PlaneGeometry, QuadraticBezierCurve3, RingGeometry,
   Scene, Vector3, WebGPURenderer, BufferGeometry, MeshBasicMaterial, DoubleSide,
-  Raycaster, Vector2,
+  Raycaster, Vector2, GridHelper,
 } from 'three/webgpu';
 
-const PANEL = 0x171c21;
-const SLAB = 0x242b32;
-const SLAB_LIT = 0x2e363e;
-const HELD = 0x19a974;
-const BLOCKED = 0xff4a1f;
-const WIRE = 0x3b7bff;
-const AGENT = 0xe8ecef;
-const SLAB_HOVER = 0x3a444d;
+const PANEL = 0x000000;
+const SLAB = 0x0c2a14;
+const SLAB_LIT = 0x10331a;
+const HELD = 0x00ff41;
+const BLOCKED = 0xff3b3b;
+const WIRE = 0x3fa9ff;
+const AGENT = 0xb9f6c7;
+const SLAB_HOVER = 0x237a38;
+const GRID = 0x0b2e15;
 
 // Who holds each file the scenario touches, so a hovered slab can say so.
 const HOLDER: Record<string, string> = {
@@ -102,12 +103,15 @@ export async function mountField(host: HTMLElement): Promise<void> {
   sun.shadow.bias = -0.0005;
   scene.add(sun);
 
-  // The plane the files sit on, and a fine rule under each row.
-  const floor = new Mesh(new PlaneGeometry(80, 80), new MeshStandardMaterial({ color: 0x1b2127, roughness: 1 }));
+  // The plane the files sit on: black, unlit, with a phosphor grid ruled
+  // across it. A lit floor this dark renders as grey, not black.
+  const floor = new Mesh(new PlaneGeometry(80, 80), new MeshBasicMaterial({ color: PANEL }));
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -0.09;
-  floor.receiveShadow = true;
   scene.add(floor);
+  const grid = new GridHelper(PITCH * 40, 40, GRID, GRID);
+  grid.position.set(PITCH / 2, -0.085, PITCH / 2);
+  scene.add(grid);
 
   // Files: one instanced mesh, colour per instance.
   const slabGeo = new BoxGeometry(0.86, 0.12, 0.86);

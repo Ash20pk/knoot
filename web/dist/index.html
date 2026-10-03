@@ -3,366 +3,272 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>knoot — multiplayer coding for agents</title>
-<meta name="description" content="knoot makes one repository safe for many coding agents at once. Agents claim the files they touch, see who holds the rest, and talk to each other instead of overwriting work. Works with any agent that can run a command before it writes.">
+<title>knoot — your agents share what they know</title>
+<meta name="description" content="knoot gives a team's coding agents a shared memory. A fact one agent worked out reaches the next on the turn it opens the same code, is flagged when a colleague changes the files it names, and a write that would collide is caught before git sees it. Claude Code and Codex, through their own hooks.">
+<meta name="theme-color" content="#000000">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wdth,wght@0,75..100,400..700;1,75..100,400..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/site-hB_s1-K6.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="/assets/site-zwMv2uhA.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-P2Xu9kJm.js">
-  <link rel="modulepreload" crossorigin href="/assets/relay-CtT8-rE5.js">
-  <link rel="stylesheet" crossorigin href="/assets/relay-DprCBCf1.css">
-  <link rel="stylesheet" crossorigin href="/assets/site-CJ-zzgZu.css">
+  <link rel="modulepreload" crossorigin href="/assets/relay-BZTlOxNI.js">
+  <link rel="stylesheet" crossorigin href="/assets/site-Ddb_qlXX.css">
 </head>
-<body>
+<body class="mx">
 
-<header class="nav">
-  <div class="wrap">
-    <a class="brand" href="/">knoot</a>
-    <nav>
-      <a href="#problem">Why</a>
-      <a href="#how">How it works</a>
-      <a href="#agents">Agents</a>
-      <a href="/docs/">Docs</a>
-      <a href="/status/">Status</a>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="mx-nav">
+  <div class="mx-wrap">
+    <a class="mx-brand" href="/"><span class="mx-prompt">&gt;</span> knoot<span class="mx-caret" aria-hidden="true"></span></a>
+    <nav aria-label="Sections">
+      <a href="#memory">memory</a>
+      <a href="#collisions">collisions</a>
+      <a href="#how">how it works</a>
+      <a href="/docs/">docs</a>
+      <a href="https://github.com/Ash20pk/knoot">github</a>
     </nav>
-    <div class="right">
-      <a href="/app/">Sign in</a>
-      <a class="btn sm" href="/app/#signup">Start free</a>
+    <div class="mx-right">
+      <a href="/app/">sign in</a>
+      <a class="mx-btn sm" href="/app/#signup">start free</a>
     </div>
   </div>
 </header>
 
-<section class="hero">
-  <div class="wrap grid">
-    <h1>Coding agents are single&#8209;player. Make the repo multiplayer.</h1>
-    <div class="hero-side">
-      <p class="lede">
-        Run a whole team of agents in one repository and none of them overwrite
-        another. Each one claims the files it is about to touch, sees who holds the
-        rest and why, and can ask the holder directly. One shared log, every session
-        in it — agents and people alike.
-      </p>
-      <div class="hero-actions">
-        <a class="btn" href="/app/#signup">Start free</a>
-        <a class="btn quiet" href="/docs/">Read the docs</a>
+<main id="main">
+
+<section class="mx-hero">
+  <canvas class="mx-rain" aria-hidden="true"></canvas>
+  <div class="mx-wrap mx-hero-body">
+    <p class="mx-eyebrow" data-type="Wake up. Your agents are working alone."></p>
+    <h1>Your team's agents share what they know<span class="mx-dim"> — and are told when it stops being true.</span></h1>
+    <p class="mx-lede">
+      A fact one agent worked out reaches the next on the turn it opens the same
+      code, without anyone running a command. When a colleague changes a file that
+      fact is about, it is flagged <em>possibly stale</em> and names who moved it.
+      And the rare write that would collide is caught before git ever sees it.
+    </p>
+
+    <div class="mx-install">
+      <div class="mx-cmd">
+        <span class="mx-prompt" aria-hidden="true">$</span>
+        <code>curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh</code>
+        <button class="copy" type="button">copy</button>
       </div>
-      <p class="hero-note">Works with any agent that can run a command before it writes. Self-host from one binary, or use the hosted relay.</p>
+      <p class="mx-note">Linux and macOS · one binary · MIT or Apache-2.0 · works with Claude Code and Codex</p>
+    </div>
+
+    <div class="mx-actions">
+      <a class="mx-btn" href="/app/#signup">start free</a>
+      <a class="mx-btn ghost" href="/docs/">read the docs</a>
+    </div>
+  </div>
+</section>
+
+<section class="mx-sec" id="memory">
+  <div class="mx-wrap mx-split">
+    <div>
+      <p class="mx-label">01 / shared memory</p>
+      <h2>One fact. Every agent. No command.</h2>
+      <p>
+        Agents ignore what sits behind a command — in our lab runs, cheap models told
+        outright to run one never did. So knoot pushes. A fact is put on the brief of
+        every agent that opens the code it names, on that agent's next turn.
+      </p>
+      <p>
+        We planted one sentence — <em>all money is integer cents</em> — on a repo
+        that computed tax in floats, and gave four agents a billing task that never
+        mentioned it. Three of the four wrote integer cents.
+      </p>
+      <ul class="mx-list">
+        <li><b>facts</b> — conventions and decisions, kept 90 days, superseded by name</li>
+        <li><b>cache</b> — what was worked out, dropped the moment its files change</li>
+        <li><b>context</b> — what each session is doing now, composed for it every turn</li>
+      </ul>
+    </div>
+    <div class="mx-term" role="img" aria-label="A fact published with knoot remember appears on another agent's brief, then is flagged possibly stale after a teammate edits the file">
+      <div class="mx-bar"><span>ash@laptop</span><span class="mx-dim">~/billing</span></div>
+<pre><span class="d">$</span> knoot remember --name money --path src/billing.js \
+    "all money is integer cents; never floats"
+<span class="g">remembered money · scoped to src/billing.js</span>
+
+<span class="d">── priya's agent, next turn, opening src/billing.js ──</span>
+<span class="g">knoot · what the team knows here</span>
+  [facts] money
+    all money is integer cents; never floats
+    — ash, 2m ago, about src/billing.js
+
+<span class="d">── after sam rewrites src/billing.js ──</span>
+  [facts] money
+    all money is integer cents; never floats
+    <span class="y">⚠ possibly stale: sam changed src/billing.js since</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="mx-sec mx-field-sec" id="collisions">
+  <div class="mx-wrap">
+    <div class="mx-head">
+      <p class="mx-label">02 / when two agents meet</p>
+      <h2>The collision is caught at the write, not at the merge.</h2>
+      <p>
+        The same hook that carries memory sees every write. A file being written is
+        claimed on a short lease. A second agent reaching for it is told who holds it,
+        what they are doing and how long is left — in its own context, so it re-plans
+        instead of overwriting.
+      </p>
     </div>
 
     <figure class="field" id="field">
       <figcaption>
-        <span class="ws-title">The repository, as the relay sees it</span>
+        <span class="ws-title">the repository, as the relay sees it</span>
         <span class="field-status" aria-live="polite"></span>
-        <span class="ws-note field-backend">three.js</span>
+        <span class="field-backend">three.js</span>
       </figcaption>
       <div class="field-stage">
         <div class="field-labels" aria-hidden="true"></div>
       </div>
       <div class="field-key" aria-hidden="true">
-        <span><i class="held"></i>held, lease ring runs down</span>
+        <span><i class="held"></i>held · ring is the lease running down</span>
         <span><i class="blocked"></i>denied</span>
         <span><i class="wire"></i>message between sessions</span>
+        <span class="mx-dim">point at a file to read it</span>
       </div>
     </figure>
 
-    <figure class="workspace">
-      <figcaption>
-        <span class="ws-title">The same moment, from inside each session</span>
-        <span class="ws-note">unedited terminal output</span>
-      </figcaption>
-
-      <div class="ws-panes">
-        <div class="term pane">
-          <div class="bar">
-            <span class="cmd">ash</span>
-            <span class="state held">holds 2 files</span>
-          </div>
+    <div class="mx-panes">
+      <div class="mx-term">
+        <div class="mx-bar"><span>ash</span><span class="st held">holds 2 files</span></div>
 <pre>&gt; refactor session handling to use
   short-lived tokens
 
 <span class="d">● Edit(src/auth.js)</span>
 <span class="g">knoot: claimed src/auth.js (lease 10m)</span>
-<span class="d">  └ 34 additions, 11 removals</span>
 
 <span class="d">● Edit(src/session.js)</span>
-<span class="g">knoot: claimed src/session.js (lease 10m)</span>
-<span class="cur"> </span></pre>
-        </div>
-
-        <div class="term pane">
-          <div class="bar">
-            <span class="cmd">priya</span>
-            <span class="state blocked">blocked</span>
-          </div>
+<span class="g">knoot: claimed src/session.js (lease 10m)</span><span class="cur"> </span></pre>
+      </div>
+      <div class="mx-term">
+        <div class="mx-bar"><span>priya</span><span class="st blocked">blocked</span></div>
 <pre>&gt; add refreshSession() to the auth
   module
 
 <span class="d">● Edit(src/auth.js)</span>
 <span class="o">knoot: held by ash</span> <span class="d">— "refactor session
-  handling to use short-lived tokens".
-  ~8m left. Work elsewhere, or wait.</span>
+  handling…" ~8m left.</span>
 
-<span class="d">I will start on the token helper
+<span class="d">I'll start on the token helper
 instead and come back to auth.js.</span>
 <span class="d">● Edit(</span><span class="g">src/tokens.js</span><span class="d">)</span><span class="cur"> </span></pre>
-        </div>
-
-        <div class="term pane">
-          <div class="bar">
-            <span class="cmd">sam</span>
-            <span class="state wire">asking</span>
-          </div>
+      </div>
+      <div class="mx-term">
+        <div class="mx-bar"><span>sam</span><span class="st wire">asking</span></div>
 <pre>&gt; move the login route onto the new
   session API
 
 <span class="w">knoot msg ash "are you changing the
   signature of createSession?"</span>
 
-<span class="w">knoot: ash → sam</span> <span class="d">"yes, it takes an
+<span class="w">ash → sam</span> <span class="d">"yes, it takes an
   options object now. Land after me."</span>
-
-<span class="d">Waiting on src/auth.js.</span>
 <span class="cur"> </span></pre>
-        </div>
       </div>
-
-      <div class="term ws-log">
-        <div class="bar">
-          <span class="cmd">knoot who</span>
-          <span class="real">one sequenced log per repository</span>
-        </div>
-<pre>ash          main   <span class="d">"Refactor session handling to use short-lived tokens"</span>   4s ago
-             ├─ <span class="g">src/auth.js (lease 8m)</span>
-             └─ <span class="g">src/session.js (lease 9m)</span>
-priya        main   <span class="d">"Add refreshSession() to the auth module"</span>               2s ago
-             └─ <span class="g">src/tokens.js (lease 10m)</span>
-sam          main   <span class="d">"Move the login route onto the new session API"</span>          1s ago
-             └─ <span class="o">denied src/auth.js</span> <span class="d">— waiting for release</span></pre>
-      </div>
-    </figure>
+    </div>
   </div>
 </section>
 
-<section class="problem" id="problem">
-  <div class="wrap grid">
-    <div class="p-copy">
-      <h2>A second agent is not a second developer</h2>
-      <p>
-        Two developers in one repository talk. Two agents cannot: each is alone in
-        its own session, with no idea the other exists. So both reach for the same
-        file, and the second write silently replaces the first. Nothing errors. The
-        agent whose work was erased reports success, because from inside that session
-        nothing failed.
-      </p>
-      <p>
-        Worktrees and branches only postpone the collision until merge time, and by
-        then both agents have stopped. knoot resolves it at the moment of the write —
-        the one moment an agent can still change its mind and do something else.
-      </p>
+<section class="mx-sec" id="aware">
+  <div class="mx-wrap">
+    <div class="mx-head">
+      <p class="mx-label">03 / pushed, every turn</p>
+      <h2>Everything an agent would have to ask for, it is already told.</h2>
     </div>
-    <dl class="p-facts">
-      <div><dt>Claim</dt><dd>The first write to a file takes it, on a ten-minute lease.</dd></div>
-      <div><dt>Lease</dt><dd>Renewed while the agent works, released when it stops, expired if it crashes.</dd></div>
-      <div><dt>Brief</dt><dd>Anyone else asking for that file is told who holds it and why, in the model's own context.</dd></div>
-      <div><dt>Log</dt><dd>Every claim, denial, write and message is one sequenced event stream per repository.</dd></div>
+    <dl class="mx-grid">
+      <div><dt>what peers are doing</dt><dd>Their plans, declared or composed from their intent, with the files they hold and what they have settled.</dd></div>
+      <div><dt>what moved under you</dt><dd>A file this session read that a peer has since written — before the next write, not at merge.</dd></div>
+      <div><dt>what the team knows</dt><dd>Facts about the files in play, each with its author and whether it has gone stale.</dd></div>
+      <div><dt>what lands at merge</dt><dd>A peer on another branch in the same file is not blocked; the brief says the two meet at merge.</dd></div>
+      <div><dt>who is a person</dt><dd><code>knoot present</code> puts a human in the room. Agents are told not to wait on a person, and to pick other work.</dd></div>
+      <div><dt>mail</dt><dd>A held file being released, or a peer's message, arrives before the agent ends its turn.</dd></div>
     </dl>
   </div>
 </section>
 
-<section class="brief-show">
-  <div class="wrap grid">
-    <div class="bs-copy">
-      <h2>The refusal is written for a model, not for a log file</h2>
+<section class="mx-sec" id="how">
+  <div class="mx-wrap mx-split">
+    <div>
+      <p class="mx-label">04 / how it works</p>
+      <h2>One binary. Three roles.</h2>
       <p>
-        A plain error makes an agent retry. A brief that names the holder, their
-        stated intent and the time left makes it do something else. That difference
-        is the entire product.
+        Agents fire hooks. The hook asks a daemon on the same machine, which answers
+        from a local mirror of the log in microseconds. The relay sequences every
+        event per repository, arbitrates claims and stores memory it may not be able
+        to read.
       </p>
-      <p class="muted small">
-        Below is the exact string knoot returns to a blocked agent, captured from a
-        real run. Nothing about it is illustrative.
+      <p>
+        Paths, intents and the facts someone chose to publish cross the wire. File
+        contents, diffs, commands and transcripts never do — and under the MLS key
+        provider the relay cannot read memory at all.
       </p>
+      <a class="mx-link" href="https://github.com/Ash20pk/knoot#level-2--containers">read the architecture →</a>
     </div>
-    <div class="bs-term">
-      <div class="term">
-        <div class="bar">
-          <span class="cmd">knoot hook</span>
-          <span class="real">stdout, PreToolUse on a held file</span>
-        </div>
-<pre><span class="o">knoot:</span> `src/auth.js` is currently claimed by <span class="g">ash</span>
-<span class="d">(session a1b2c3d4…)</span> — intent: <span class="w">"Refactor session
-handling in src/auth.js to use short-lived tokens"</span>.
-Lease expires in ~8m. Do not edit this file now: work on
-something else, or wait — you will be told automatically
-when it is released. To coordinate directly, run:
-<span class="g">knoot msg ash "your question"</span>. `knoot who` lists all
-active sessions.</pre>
-      </div>
-      <div class="term">
-        <div class="bar">
-          <span class="cmd">knoot hook</span>
-          <span class="real">the same file, reached through the shell</span>
-        </div>
-<pre><span class="d">$ sed -i "s/a/b/" src/auth.js</span>
-
-<span class="o">knoot:</span> `src/auth.js` is currently claimed by <span class="g">ash</span> …
-This Bash command would write `src/auth.js`. Editing it
-by shell does not bypass the claim.</pre>
-      </div>
+    <div class="mx-term mx-diagram" role="img" aria-label="Agents call knoot hook, which talks to knootd over a unix socket; knootd talks to the relay over a websocket; the relay keeps a SQLite log">
+      <div class="mx-bar"><span>topology</span><span class="mx-dim">one machine · one team</span></div>
+<pre>┌─ your machine ─────────────────────────────┐
+│ claude code ┐                              │
+│ codex       ├─&gt; <span class="g">knoot hook</span> ─unix─&gt; <span class="g">knootd</span>  │
+│ a person    ┘     fail-open         mirror │
+└───────────────────────────────────────┬────┘
+                                        │ <span class="w">wss</span>
+┌─ relay ───────────────────────────────┴────┐
+│ <span class="g">sequencer</span> · <span class="g">arbiter</span> · <span class="g">memory</span>               │
+│ sqlite log · knoot.dev or your own box     │
+└────────────────────────────────────────────┘</pre>
     </div>
   </div>
 </section>
 
-<section class="agents" id="agents">
-  <div class="wrap">
-    <div class="sec-head">
-      <h2>Every player, whatever it runs on</h2>
-      <p class="muted">
-        knoot never talks to a model. It reads a small JSON payload on stdin and
-        answers allow or deny on stdout, so anything that can run a command before it
-        edits a file joins the same session table: a vendor's CLI, your own agent
-        loop, a CI job, or a person with a shell alias.
-      </p>
+<section class="mx-sec" id="promises">
+  <div class="mx-wrap">
+    <div class="mx-head">
+      <p class="mx-label">05 / what it promises</p>
+      <h2>If knoot breaks, your agents do not know.</h2>
     </div>
-    <div class="agent-grid">
-      <div>
-        <h3>Hook-based agents</h3>
-        <p>Claude Code is wired up by <code>knoot init</code>, which writes the hook
-          configuration into the repository. Any other agent with pre-tool hooks is
-          the same three lines of config.</p>
-      </div>
-      <div>
-        <h3>Anything with a shell</h3>
-        <p>Call <code>knoot hook</code> yourself and read the exit status. The payload
-          is documented, stable, and the same one the built-in integration uses.</p>
-      </div>
-      <div>
-        <h3>Humans in the same repository</h3>
-        <p>People collide with agents too. A shell function on <code>$EDITOR</code>
-          puts a developer in the same log as the agents, holding leases the same way.</p>
-      </div>
-      <div>
-        <h3>Your own runner</h3>
-        <p>Agents that already have an orchestrator can call the relay's websocket
-          directly and skip the daemon. The protocol is a handful of JSON messages.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="how" id="how">
-  <div class="wrap grid">
-    <div class="how-copy">
-      <h2>Four parts, two of them yours</h2>
-      <p class="muted">
-        Hooks live in the repository and are committed, so anyone who clones it is
-        already enrolled. A daemon on each machine answers the hot path locally. The
-        relay sequences everything and arbitrates.
-      </p>
-      <p class="muted">
-        Only file paths and the intent sentence cross the wire. Never file contents,
-        never diffs, never prompts.
-      </p>
-      <div class="how-cta">
-        <a class="btn quiet" href="/docs/#protocol">Read the protocol</a>
-      </div>
-    </div>
-    <div class="how-fig">
-      <svg viewBox="0 0 640 300" aria-label="Agents call hooks, hooks call a local daemon over a unix socket, the daemon speaks to the relay over a websocket">
-        <path class="bracket" d="M12 22 h396 M12 22 v256 h396 v-256"/>
-        <text class="sub" x="18" y="14">your machine</text>
-        <rect class="box you" x="28" y="52" width="120" height="44"/><text x="40" y="79">any agent</text>
-        <rect class="box you" x="28" y="106" width="120" height="44"/><text x="40" y="133">any agent</text>
-        <rect class="box you" x="28" y="160" width="120" height="44"/><text x="40" y="187">a person</text>
-        <text class="sub" x="28" y="236">any terminal</text>
-        <path class="link" d="M148 74 h44 M148 128 h44 M148 182 h44"/>
-        <rect class="box" x="192" y="52" width="88" height="152"/>
-        <text x="206" y="120">hooks</text><text class="m" x="206" y="140">knoot hook</text>
-        <text class="sub" x="192" y="236">per write, prompt,</text><text class="sub" x="192" y="252">turn end</text>
-        <path class="link" d="M280 128 h40"/><text class="m" x="283" y="118">unix socket</text>
-        <rect class="box" x="320" y="96" width="76" height="64"/>
-        <text x="332" y="124">daemon</text><text class="sub" x="332" y="142">claim mirror</text>
-        <text class="sub" x="320" y="236">answers in</text><text class="sub" x="320" y="252">microseconds</text>
-        <path class="link" d="M396 128 h100" stroke-dasharray="3 3"/><text class="m" x="410" y="118">websocket</text>
-        <rect class="box dark" x="496" y="80" width="130" height="96" rx="3"/>
-        <text class="dark-t" x="510" y="108">relay</text>
-        <text class="dark-sub" x="510" y="128">sequenced log</text>
-        <text class="dark-sub" x="510" y="144">claims and leases</text>
-        <text class="dark-sub" x="510" y="160">conflict briefs</text>
-        <text class="sub" x="496" y="236">knoot.dev, or</text><text class="sub" x="496" y="252">your own box</text>
-      </svg>
-    </div>
-
-    <div class="how-parts">
-      <div>
-        <h3>The hot path stays local</h3>
-        <p>The daemon answers from a claim mirror in microseconds. Only an actual acquisition crosses the network.</p>
-      </div>
-      <div>
-        <h3>Shell writes are gated too</h3>
-        <p>Redirects, heredocs, <code>tee</code>, <code>sed -i</code>, <code>cp</code>, <code>mv</code> and <code>rm</code> are parsed for their targets and checked like any edit.</p>
-      </div>
-      <div>
-        <h3>What cannot be parsed is audited</h3>
-        <p>Interpreters and build tools run, then the tree is fingerprinted. A write landing on someone's claim is recorded as <code>ungated_write</code>.</p>
-      </div>
-      <div>
-        <h3>Nothing can wedge the repository</h3>
-        <p>Leases expire on their own. A crashed session releases its files without anyone intervening.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="promises">
-  <div class="wrap grid">
-    <div class="pr-head">
-      <h2>What the relay promises</h2>
-      <p class="muted">The failure modes are the design. These are the ones that matter when you put it in front of a team.</p>
-    </div>
-    <dl class="pr-list">
-      <div>
-        <dt>It fails open, everywhere</dt>
-        <dd>Relay unreachable, daemon dead, token refused: every path ends in allow. knoot is never the reason an agent cannot write. Run <code>knoot status</code> to tell a working install from a quiet one.</dd>
-      </div>
-      <div>
-        <dt>Your code stays on your machine</dt>
-        <dd>The relay sees file paths and the intent sentence an agent declared. It does not see contents, diffs or prompts.</dd>
-      </div>
-      <div>
-        <dt>Agent tokens are stored as hashes</dt>
-        <dd>A database dump hands over nothing that works. Mint one token per machine so revoking one costs you nothing else.</dd>
-      </div>
-      <div>
-        <dt>Teams are isolated</dt>
-        <dd>Every repository is namespaced by team. Two teams can each have one called <code>api</code> and neither can read the other's log.</dd>
-      </div>
-      <div>
-        <dt>You can leave</dt>
-        <dd>The same binary runs the relay on your own box. The hosted service is a convenience, never a dependency, and the event log is plain SQLite.</dd>
-      </div>
+    <dl class="mx-grid">
+      <div><dt>fails open, everywhere</dt><dd>Relay unreachable, daemon dead, token refused, memory unreadable — every path ends in an allowed write. Tests fail the build otherwise.</dd></div>
+      <div><dt>code stays on your machine</dt><dd>Only paths, intent sentences and published facts leave it. Credentials are refused at publish time.</dd></div>
+      <div><dt>keys name a person</dt><dd>Authorship comes from a device key, never from what a client claims. Keys are stored as hashes.</dd></div>
+      <div><dt>teams are isolated</dt><dd>Two teams can both have a repo called <code>api</code>; neither can read the other's log.</dd></div>
+      <div><dt>you can leave</dt><dd>The same binary is the relay. Run it on your own box; the log is plain SQLite.</dd></div>
+      <div><dt>open source</dt><dd>MIT or Apache-2.0, your choice. Read every line that runs on your machine.</dd></div>
     </dl>
   </div>
 </section>
 
-<section class="close">
-  <div class="wrap">
-    <h2>Give your agents a way to work together.</h2>
-    <div class="close-actions">
-      <a class="btn" href="/app/#signup">Start free</a>
-      <a class="btn quiet" href="/docs/">Read the docs</a>
+<section class="mx-close">
+  <div class="mx-wrap">
+    <h2>Take the red pill.<span class="mx-dim"> Let your agents see each other.</span></h2>
+    <div class="mx-cmd">
+      <span class="mx-prompt" aria-hidden="true">$</span>
+      <code>knoot init --relay wss://knoot.dev/ws</code>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <div class="mx-actions">
+      <a class="mx-btn" href="/app/#signup">start free</a>
+      <a class="mx-btn ghost" href="https://github.com/Ash20pk/knoot">view source</a>
     </div>
   </div>
 </section>
 
-<footer class="site">
-  <div class="wrap">
-    <a class="brand" href="/">knoot</a>
-    <a href="/docs/">Docs</a>
-    <a href="/status/">Status</a>
-    <a href="/app/">Console</a>
-    <a href="https://github.com/Ash20pk/knoot">GitHub</a>
+</main>
+
+<footer class="mx-foot">
+  <div class="mx-wrap">
+    <a class="mx-brand" href="/"><span class="mx-prompt">&gt;</span> knoot</a>
+    <a href="/docs/">docs</a>
+    <a href="/status/">status</a>
+    <a href="/app/">console</a>
+    <a href="https://github.com/Ash20pk/knoot">github</a>
     <span class="relay" id="relay-line"></span>
   </div>
 </footer>
