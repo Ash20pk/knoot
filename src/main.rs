@@ -108,7 +108,7 @@ enum Cmd {
     /// Add, list or remove the people on this team, and mint their keys.
     ///
     /// The console does this too, but only against a relay attached to
-    /// Supabase — inviting by email is a cloud feature. On a self-hosted
+    /// Neon — inviting by email is a cloud feature. On a self-hosted
     /// relay this is the way in.
     #[command(subcommand)]
     Member(MemberCmd),
@@ -981,7 +981,7 @@ fn queued_or_not(root: &Path, req: &DReq, what: &str) -> Result<()> {
 ///
 /// Every call is an admin call against the relay's HTTP API with this
 /// machine's stored key, so it works the same whether or not the relay has a
-/// Supabase behind it.
+/// Neon project behind it.
 async fn member(cmd: MemberCmd) -> Result<()> {
     let (relay, base, key) = match &cmd {
         MemberCmd::Add { relay, .. } | MemberCmd::Ls { relay, .. } | MemberCmd::Rm { relay, .. } => {

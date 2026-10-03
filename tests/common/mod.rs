@@ -326,7 +326,7 @@ pub async fn start_granting_relay() -> String {
 //
 // This exists because for three phases the tests for areas, memory and MLS
 // each reached into the relay's SQLite file to invent a colleague — there was
-// no call that made one on a relay with no Supabase behind it. That was the
+// no call that made one on a relay with no Neon project behind it. That was the
 // gap, not the workaround: a test that sets up state the product cannot is a
 // test of something nobody can actually do. Now there is `POST /api/members`,
 // and these tests go through it.

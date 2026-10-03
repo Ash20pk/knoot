@@ -16,9 +16,9 @@
 //! * **Old keys keep working.** A `tokens` row with no device is migrated to a
 //!   device of a synthetic, unassigned member in the team's `general` room. No
 //!   deployment needs a flag day.
-//! * **It works with no Supabase.** Rooms are enforced here, so they live
+//! * **It works with no Neon.** Rooms are enforced here, so they live
 //!   here. A self-hosted relay gets members and rooms with no cloud at all;
-//!   Supabase, when present, only tells us a person's email and role.
+//!   Neon, when present, only tells us a person's email and role.
 //! * **It works unconfigured.** The `root` and `local` identities keep their
 //!   shape and land in a `general` room over every repo.
 
@@ -31,8 +31,8 @@ use anyhow::{Context, Result};
 pub struct Member {
     pub id: String,
     pub email: String,
-    /// Team-level role: `owner` | `admin` | `member`. Mirrored from Supabase
-    /// when there is a Supabase; authoritative here when there is not.
+    /// Team-level role: `owner` | `admin` | `member`. Mirrored from Neon
+    /// when there is a Neon project; authoritative here when there is not.
     pub role: String,
     /// A member invented by the migration to carry a pre-member token. The
     /// console offers these to an admin to attach to a real person.
@@ -232,7 +232,7 @@ pub fn general_room(conn: &rusqlite::Connection, team_id: &str) -> Result<String
 }
 
 /// Record a person, and put them in `general`. Idempotent on `(team, email)`,
-/// because this runs on every console request that resolves a Supabase user.
+/// because this runs on every console request that resolves a Neon user.
 ///
 /// An existing row is updated but never *downgraded* out of being real: once a
 /// migrated `unassigned` member is attached to an email, it stops being

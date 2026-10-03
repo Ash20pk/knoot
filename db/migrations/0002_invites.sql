@@ -4,11 +4,11 @@
 -- user, so without this a team is permanently a team of one — which is why
 -- this function is not optional for multiplayer.
 --
--- Supabase owns people, so it owns the invite. The relay owns rooms and device
+-- Neon owns people, so it owns the invite. The relay owns rooms and device
 -- keys, and learns about a new person the first time their console session
 -- authenticates. Nothing here reaches across.
 --
--- Apply with: supabase db push, or paste into the SQL editor.
+-- Apply after 0001, the same way.
 
 create table if not exists public.invites (
   id          uuid primary key default gen_random_uuid(),
@@ -18,11 +18,11 @@ create table if not exists public.invites (
   -- Only the hash is stored, for the same reason the relay only stores a
   -- token hash: a database dump must not hand over working invitations.
   token_hash  text not null unique,
-  invited_by  uuid references auth.users (id) on delete set null,
+  invited_by  uuid references neon_auth."user" (id) on delete set null,
   created_at  timestamptz not null default now(),
   expires_at  timestamptz not null default now() + interval '7 days',
   accepted_at timestamptz,
-  accepted_by uuid references auth.users (id) on delete set null
+  accepted_by uuid references neon_auth."user" (id) on delete set null
 );
 
 create index if not exists invites_team_idx on public.invites (team_id);
@@ -62,7 +62,7 @@ create or replace function public.invite_member(invite_email text, invite_role t
 returns text
 language plpgsql
 security definer
-set search_path = public, extensions
+set search_path = public
 as $$
 declare
   uid    uuid := auth.uid();
@@ -118,7 +118,7 @@ create or replace function public.accept_invite(invite_token text)
 returns public.teams
 language plpgsql
 security definer
-set search_path = public, extensions
+set search_path = public
 as $$
 declare
   uid  uuid := auth.uid();
@@ -129,7 +129,7 @@ begin
   if uid is null then
     raise exception 'not signed in';
   end if;
-  select email into mail from auth.users where id = uid;
+  select email into mail from neon_auth."user" where id = uid;
 
   select * into inv from public.invites
    where token_hash = encode(digest(coalesce(invite_token, ''), 'sha256'), 'hex')
@@ -187,7 +187,7 @@ $$;
 
 -- Remove a person from a team. The relay's own copy of the member, and their
 -- device keys, are revoked separately through `/api/members/:id/remove` —
--- Supabase cannot reach the relay, and a relay that trusted a webhook from
+-- Neon cannot reach the relay, and a relay that trusted a webhook from
 -- anywhere would be a worse trade than two explicit steps.
 create or replace function public.remove_member(member_user uuid)
 returns void
@@ -216,6 +216,8 @@ begin
   delete from public.team_members where team_id = team and user_id = member_user;
 end;
 $$;
+
+grant select on public.invites to authenticated;
 
 revoke all on function public.invite_member(text, text) from public;
 revoke all on function public.accept_invite(text) from public;

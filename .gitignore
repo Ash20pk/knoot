@@ -1,4 +1,6 @@
 /target
 
-# supabase CLI link state
+# neon CLI context
+.neon
+# supabase CLI link state, from before the move to Neon
 supabase/.temp/

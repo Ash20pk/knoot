@@ -55,7 +55,7 @@ fn ctx() -> &'static Ctx {
                 // Through the relay's own API, as the console does. This used
                 // to open the relay's SQLite file to invent a colleague,
                 // because until `POST /api/members` existed there was no
-                // other way on a relay with no Supabase behind it.
+                // other way on a relay with no Neon project behind it.
                 let admin = Admin::register("Acme", "ash@example.com").await;
                 let (peer_member, peer_key) =
                     admin.add_member("priya@example.com", "priya laptop").await;

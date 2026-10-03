@@ -50,7 +50,7 @@ struct App {
     /// Open registration needs a brake. Five teams per hour per address is
     /// generous for a human and useless for a script.
     reg_limit: crate::teams::RateLimit,
-    /// Supabase, when this relay is attached to a project. `None` on a
+    /// Neon, when this relay is attached to a project. `None` on a
     /// self-hosted relay, where agent tokens are the only credential.
     cloud: Option<crate::cloud::Cloud>,
     /// Which key provider this deployment seals memory with — `plaintext` for
@@ -832,7 +832,7 @@ struct AddMemberBody {
 
 /// Create a member. The call a self-hosted relay had no way to make.
 ///
-/// Until now a second *person* could only come into being through Supabase —
+/// Until now a second *person* could only come into being through Neon —
 /// `invite_member` and `accept_invite` — so a relay running with no cloud
 /// could mint as many keys as it liked and every one of them named the same
 /// human. Rooms, areas and memory provenance are all about *who*, which made

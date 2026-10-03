@@ -1,10 +1,16 @@
 -- knoot identity schema.
 --
--- Supabase owns people and teams. The relay owns the event log and the hashed
+-- Neon owns people and teams: Neon Auth keeps the accounts in `neon_auth.user`
+-- and these tables hang off them. The relay owns the event log and the hashed
 -- agent tokens, because those have to keep working when the network does not.
 -- The only thing crossing between them is a team id.
 --
--- Apply with: supabase db push, or paste into the SQL editor.
+-- Needs Neon Auth and the Data API enabled on the branch first: that is what
+-- creates `neon_auth.user`, the `authenticated` role and `auth.uid()`, which
+-- reads the person out of the JWT the Data API was handed.
+--
+-- Apply with: psql "$(neon connection-string --role-name neondb_owner)" -f <file>,
+-- in order, then `neon data-api refresh-schema`.
 
 create extension if not exists "pgcrypto";
 
@@ -17,7 +23,7 @@ create table if not exists public.teams (
 
 create table if not exists public.team_members (
   team_id     uuid not null references public.teams (id) on delete cascade,
-  user_id     uuid not null references auth.users (id) on delete cascade,
+  user_id     uuid not null references neon_auth."user" (id) on delete cascade,
   email       text not null,
   role        text not null default 'member' check (role in ('owner', 'admin', 'member')),
   created_at  timestamptz not null default now(),
@@ -79,7 +85,7 @@ begin
     raise exception 'you already belong to a team';
   end if;
 
-  select email into mail from auth.users where id = uid;
+  select email into mail from neon_auth."user" where id = uid;
 
   insert into public.teams (name, slug)
   values (
@@ -95,6 +101,13 @@ begin
   return t;
 end;
 $$;
+
+-- Supabase granted every role every table in `public` by default and left RLS
+-- to narrow it. Neon grants nothing, so the console's reach is spelled out:
+-- read its own team, rename it, and nothing it could write around a function.
+grant usage on schema public to authenticated;
+grant select on public.teams, public.team_members to authenticated;
+grant update (name) on public.teams to authenticated;
 
 revoke all on function public.create_team(text) from public;
 grant execute on function public.create_team(text) to authenticated;

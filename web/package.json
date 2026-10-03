@@ -15,7 +15,7 @@
     "vite": "^8.2.2"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.46.1",
+    "@neondatabase/neon-js": "^0.7.0-beta",
     "@types/three": "^0.185.4",
     "three": "^0.185.1",
     "xterm": "^5.3.0",

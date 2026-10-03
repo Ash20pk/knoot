@@ -440,6 +440,8 @@ const TOKEN_PREFIXES: &[(&str, &str)] = &[
     ("knt_", "a knoot device key"),
     ("sb_secret_", "a Supabase secret key"),
     ("sbp_", "a Supabase access token"),
+    ("napi_", "a Neon API key"),
+    ("npg_", "a Neon database password"),
     ("ghp_", "a GitHub token"),
     ("gho_", "a GitHub token"),
     ("ghs_", "a GitHub token"),

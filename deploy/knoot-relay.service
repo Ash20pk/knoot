@@ -10,10 +10,11 @@ User=knoot
 Group=knoot
 # KNOOT_RELAY_TOKEN lives here, 0600, never in the repo.
 EnvironmentFile=/etc/knoot/relay.env
-# Console sign-in: SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY.
+# Console sign-in: NEON_AUTH_URL and NEON_DATA_API_URL. Neither is a secret;
+# the relay verifies people's JWTs against Neon Auth's published keys.
 # Optional — without it the relay runs exactly as before and agent tokens are
 # the only credential, so the file is not required to exist.
-EnvironmentFile=-/etc/knoot/supabase.env
+EnvironmentFile=-/etc/knoot/neon.env
 ExecStart=/usr/local/bin/knoot relay --listen 127.0.0.1:7420 --db /var/lib/knoot/relay.db
 Restart=always
 RestartSec=2

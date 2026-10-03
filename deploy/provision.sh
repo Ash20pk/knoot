@@ -143,11 +143,15 @@ say "token"
 install -d -m 0755 /etc/knoot
 # Console sign-in is optional. Say so plainly when it is off, the same way
 # Litestream does, so "sign-in is not configured" is never a mystery.
-if [[ -s /etc/knoot/supabase.env ]]; then
-	chmod 0600 /etc/knoot/supabase.env
-	say "console sign-in configured (/etc/knoot/supabase.env)"
+if [[ -s /etc/knoot/neon.env ]]; then
+	chmod 0600 /etc/knoot/neon.env
+	say "console sign-in configured (/etc/knoot/neon.env)"
 else
-	say "console sign-in OFF — no /etc/knoot/supabase.env; agent tokens still work"
+	say "console sign-in OFF — no /etc/knoot/neon.env; agent tokens still work"
+fi
+# A Supabase file left over from before the move to Neon is no longer read.
+if [[ -e /etc/knoot/supabase.env ]]; then
+	say "note: /etc/knoot/supabase.env is unused since the move to Neon"
 fi
 
 if ! [[ -s /etc/knoot/relay.env ]]; then

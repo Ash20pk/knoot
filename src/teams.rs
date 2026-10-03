@@ -173,7 +173,7 @@ pub fn create_team_legacy(conn: &rusqlite::Connection, name: &str) -> Result<(Id
 }
 
 /// Record a team that was authenticated elsewhere, so local rows can point at
-/// it. Identity lives in Supabase; this is the relay's own copy of the name,
+/// it. Identity lives in Neon; this is the relay's own copy of the name,
 /// which `resolve` joins against when listing a team's tokens.
 pub fn ensure_team(conn: &rusqlite::Connection, team_id: &str, name: &str) {
     let _ = conn.execute(

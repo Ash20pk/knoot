@@ -320,7 +320,7 @@ async fn a_second_person_can_join_and_be_removed_without_touching_other_keys() {
     assert_eq!(code, 200);
 
     // Priya's key. She has no console sign-in here, so the owner mints for a
-    // member the owner created — the self-hosted path, with no Supabase.
+    // member the owner created — the self-hosted path, with no Neon.
     let (code, minted) = post(
         &format!("{base}/api/tokens"),
         Some(&owner_key),
@@ -488,7 +488,7 @@ async fn an_environment_credential_cannot_manage_members_or_rooms() {
 }
 
 /// The gap this closes: until now a second *person* could only come into being
-/// through Supabase, so a self-hosted relay could mint any number of keys and
+/// through Neon, so a self-hosted relay could mint any number of keys and
 /// every one of them named the same human. Rooms, areas and memory provenance
 /// are all about *who*.
 #[tokio::test]

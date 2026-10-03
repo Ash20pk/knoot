@@ -32,7 +32,7 @@ fn declared() -> Vec<AreaDef> {
 ///
 /// Every call here goes through the relay's own API — the same calls the
 /// console and `knoot member` make. It used to reach into the relay's SQLite
-/// file, because there was no way to create a second person without Supabase;
+/// file, because there was no way to create a second person without Neon;
 /// a test that sets up state the product cannot reach is a test of something
 /// nobody can do.
 async fn relay_with_two_people() -> (String, String, String) {

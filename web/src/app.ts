@@ -2,9 +2,9 @@ import { RELAY_WS, esc, wireCopyButtons } from './lib/relay';
 import { api, type TeamPayload, type RelayEvent, type RelayMember, type Area, type MemoryPayload, type MemoryItem } from './lib/api';
 import { LiveRepo, EVENT_CLASS, eventDetail, ago } from './lib/live';
 import {
-  configured, supabase, loadTeam, createTeam, inviteMember, listInvites, revokeInvite,
-  acceptInvite, removeTeamMember, type Team, type Invite,
-} from './lib/supabase';
+  configured, neon, loadTeam, createTeam, inviteMember, listInvites, revokeInvite,
+  acceptInvite, removeTeamMember, setNewPassword, changePassword, type Team, type Invite,
+} from './lib/neon';
 
 const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T | null =>
   root.querySelector<T>(sel);
@@ -45,14 +45,21 @@ const takeTeamName = (): string | null => {
 };
 
 /**
- * `recover` is where a password-reset link lands. Supabase signs the person
- * in from the link and says so with a `PASSWORD_RECOVERY` event; without a
- * page that catches it they would arrive in the console already signed in and
- * never be asked for the new password the link was for. The fragment is read
- * here too, before the client strips it, so the mode is right on first paint.
+ * `recover` is where a password-reset link lands. Neon Auth sends the person
+ * back with a one-time `?token=` and no session, so the new password is set
+ * with that token and they sign in with it afterwards. A link that has expired
+ * or was used comes back as `?error=` instead, and says so.
+ *
+ * The token is taken out of the address bar as soon as it is read, so it does
+ * not sit in history or get copied along with a link to the console.
  */
+const landing = new URLSearchParams(location.search);
+const resetToken = landing.get('token');
+const resetFailed = landing.has('error');
+if (resetToken || resetFailed) history.replaceState(null, '', location.pathname + location.hash);
+
 type Mode = 'signin' | 'signup' | 'recover';
-let mode: Mode = /type=recovery/.test(location.hash) ? 'recover'
+let mode: Mode = resetToken ? 'recover'
   : location.hash === '#signup' ? 'signup' : 'signin';
 
 function paintAuthMode(): void {
@@ -106,7 +113,7 @@ $('#auth-reset')!.addEventListener('click', async () => {
   const email = ($('#auth-email') as HTMLInputElement).value.trim();
   if (!email) { authMessage('err', 'Enter your email address first, then choose Forgot password.'); return; }
   try {
-    const { error } = await supabase!.auth.resetPasswordForEmail(email, {
+    const { error } = await neon!.auth.resetPasswordForEmail(email, {
       redirectTo: `${location.origin}/app/`,
     });
     if (error) throw new Error(error.message);
@@ -126,13 +133,14 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
   btn.disabled = true;
   btn.textContent = mode === 'signup' ? 'Creating account' : 'Signing in';
   try {
-    const sb = supabase!;
+    const sb = neon!;
     if (mode === 'recover') {
-      const { error } = await sb.auth.updateUser({ password });
-      if (error) throw new Error(error.message);
+      await setNewPassword(resetToken!, password);
       mode = 'signin';
-      history.replaceState(null, '', location.pathname);
-      await boot();
+      paintAuthMode();
+      ($('#auth-password') as HTMLInputElement).value = '';
+      authMessage('ok', 'Password set. Sign in with it.');
+      ($('#auth-email') as HTMLInputElement).focus();
       return;
     }
     if (mode === 'signup') {
@@ -176,7 +184,7 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
 
 $('#signout')!.addEventListener('click', async () => {
   live?.close();
-  await supabase?.auth.signOut();
+  await neon?.auth.signOut();
   team = null;
   location.hash = '';
   showAuth();
@@ -1126,13 +1134,13 @@ async function viewTeam(): Promise<void> {
   const paintMembers = async (): Promise<void> => {
     try {
       // Where the list comes from depends on what is behind this relay.
-      // Supabase owns *people* when there is one; when there is not, the
+      // Neon owns *people* when there is one; when there is not, the
       // relay's own member rows are the whole truth — which is exactly the
       // case that had no console at all until now.
       const rows: Array<{ user_id: string; email: string; role: string; created_at: string }> =
         configured
           ? await (async () => {
-              const sb = supabase!;
+              const sb = neon!;
               const { data, error } = await sb
                 .from('team_members')
                 .select('user_id, email, role, created_at');
@@ -1142,7 +1150,7 @@ async function viewTeam(): Promise<void> {
           : relayMembers
               .filter((m) => !m.unassigned)
               .map((m) => ({
-                // No Supabase user behind them, so no user id. The remove
+                // No Neon user behind them, so no user id. The remove
                 // button keys off the relay member id instead.
                 user_id: '',
                 email: m.email,
@@ -1168,10 +1176,10 @@ async function viewTeam(): Promise<void> {
           if (!confirm(`Remove ${b.dataset.email}? Their keys stop working at once. Nobody else's key changes.`)) return;
           b.disabled = true;
           try {
-            // Two systems, two steps: Supabase owns the person, the relay owns
+            // Two systems, two steps: Neon owns the person, the relay owns
             // their keys and rooms. The relay half is what actually stops a
             // machine coordinating, so it must not be skipped when the member
-            // has a row there. With no Supabase there is only the relay half.
+            // has a row there. With no Neon there is only the relay half.
             if (configured && b.dataset.remove) await removeTeamMember(b.dataset.remove);
             if (b.dataset.member) {
               await api(`/api/members/${encodeURIComponent(b.dataset.member)}/remove`, { method: 'POST' });
@@ -1258,6 +1266,10 @@ function viewSettings(): void {
         <div class="panel-head"><h2>Password</h2></div>
         <div class="panel-body">
           <label class="field" style="max-width:400px;margin-top:0">
+            <span>Current password</span>
+            <input id="current-password" type="password" autocomplete="current-password">
+          </label>
+          <label class="field" style="max-width:400px">
             <span>New password</span>
             <input id="new-password" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters">
           </label>
@@ -1273,12 +1285,18 @@ function viewSettings(): void {
     const err = $('#pw-err') as HTMLElement;
     const ok = $('#pw-ok') as HTMLElement;
     err.hidden = true; ok.hidden = true;
+    const current = ($('#current-password') as HTMLInputElement).value;
     const password = ($('#new-password') as HTMLInputElement).value;
+    if (!current) { err.textContent = 'Enter your current password.'; err.hidden = false; return; }
     if (password.length < 8) { err.textContent = 'Use at least 8 characters.'; err.hidden = false; return; }
-    const { error } = await supabase!.auth.updateUser({ password });
-    if (error) { err.textContent = error.message; err.hidden = false; return; }
-    ok.textContent = 'Password changed.';
+    try {
+      await changePassword(current, password);
+    } catch (e) {
+      err.textContent = (e as Error).message; err.hidden = false; return;
+    }
+    ok.textContent = 'Password changed. Other devices are signed out.';
     ok.hidden = false;
+    ($('#current-password') as HTMLInputElement).value = '';
     ($('#new-password') as HTMLInputElement).value = '';
   });
 }
@@ -1323,10 +1341,15 @@ function takeInvite(): string | null {
 
 async function boot(): Promise<void> {
   if (!configured) { showAuth(); return; }
-  const { data } = await supabase!.auth.getSession();
-  if (!data.session) { stashInvite(); showAuth(); return; }
-  // Signed in by a reset link: ask for the new password before anything else.
+  // Arrived from a reset link: ask for the new password before anything else.
   if (mode === 'recover') { showAuth(); ($('#auth-password') as HTMLInputElement).focus(); return; }
+  const { data } = await neon!.auth.getSession();
+  if (!data.session) {
+    stashInvite();
+    showAuth();
+    if (resetFailed) authMessage('err', 'That reset link has expired or was already used. Choose Forgot password for a new one.');
+    return;
+  }
 
   bootEl.hidden = false;
   authEl.hidden = true;
@@ -1367,16 +1390,6 @@ async function boot(): Promise<void> {
   shellEl.hidden = false;
   render();
 }
-
-// The client parses the recovery fragment on its own schedule; if it gets
-// there before this module read the hash, the event is what says so.
-supabase?.auth.onAuthStateChange((event) => {
-  if (event === 'PASSWORD_RECOVERY' && mode !== 'recover') {
-    mode = 'recover';
-    showAuth();
-    ($('#auth-password') as HTMLInputElement).focus();
-  }
-});
 
 addEventListener('hashchange', () => {
   if (shellEl.hidden) {

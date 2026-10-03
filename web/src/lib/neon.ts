@@ -1,31 +1,33 @@
-import { createClient, type SupabaseClient, type Session } from '@supabase/supabase-js';
+import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
 
 /**
- * Supabase holds identity and the team records: who you are, which team you
- * belong to, and the metadata for each agent token. The event log stays on the
- * relay, because that is the thing that has to survive without a network.
+ * Neon holds identity and the team records: who you are, which team you
+ * belong to, and the invitations into it. The event log stays on the relay,
+ * because that is the thing that has to survive without a network.
  *
- * The key is injected at build time. A build without one still serves every
- * page; the console just explains that sign-in is not configured rather than
- * throwing on load.
+ * Both URLs are injected at build time and both are public: the auth URL is
+ * where the browser signs in, and everything the Data API URL can reach is
+ * behind row-level security keyed on the signed-in person's JWT. There is no
+ * key to leak. A build without them still serves every page; the console just
+ * explains that sign-in is not configured rather than throwing on load.
  *
- * `sb_publishable_…` is the current browser-safe key. The legacy `anon` name
- * is still read, because Supabase keeps both working until it retires the old
- * keys at the end of 2026. Either way this is a public value: everything it
- * can reach is behind row-level security.
+ * The Supabase-shaped adapter keeps the auth calls this console was written
+ * against. Password changes are the exception — see `setNewPassword` and
+ * `changePassword` below.
  */
-const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const PUBLISHABLE =
-  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ??
-  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
+const AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL as string | undefined;
+const DATA_API_URL = import.meta.env.VITE_NEON_DATA_API_URL as string | undefined;
 
-export const configured = Boolean(URL_ && PUBLISHABLE);
+export const configured = Boolean(AUTH_URL && DATA_API_URL);
 
-export const supabase: SupabaseClient | null = configured
-  ? createClient(URL_!, PUBLISHABLE!, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+export const neon = configured
+  ? createClient({
+      auth: { url: AUTH_URL!, adapter: SupabaseAuthAdapter() },
+      dataApi: { url: DATA_API_URL! },
     })
   : null;
+
+type Client = NonNullable<typeof neon>;
 
 export type Team = {
   id: string;
@@ -57,15 +59,40 @@ export type Repo = {
   last_seen_at: string | null;
 };
 
-export function requireClient(): SupabaseClient {
-  if (!supabase) throw new Error('Sign-in is not configured on this deployment.');
-  return supabase;
+export function requireClient(): Client {
+  if (!neon) throw new Error('Sign-in is not configured on this deployment.');
+  return neon;
 }
 
-export async function currentSession(): Promise<Session | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getSession();
-  return data.session;
+/**
+ * Finish a password reset. The emailed link lands on the console with a
+ * one-time `token` in the query string; it is not a session, so the person
+ * signs in with the new password afterwards. Supabase's `updateUser` did this
+ * from a recovery session, and Neon's adapter refuses a password there.
+ */
+export async function setNewPassword(token: string, newPassword: string): Promise<void> {
+  const ba = requireClient().auth.getBetterAuthInstance();
+  // Better Auth calls a used or expired link an invalid session token, which
+  // is true and no help to someone holding an old email. It may return that
+  // or throw it, depending on the client's fetch options.
+  const used = new Error('That reset link has expired or was already used. Choose Forgot password for a new one.');
+  const { error } = await ba.resetPassword({ newPassword, token }).catch(() => { throw used; });
+  if (error) throw used;
+}
+
+/** Change the password of the signed-in person. Needs the current one. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const ba = requireClient().auth.getBetterAuthInstance();
+  // A wrong current password comes back as "Invalid email or password", which
+  // reads as if the account were the problem. Returned or thrown, as above.
+  const wrong = (e: { status?: number; message?: string }): Error =>
+    e.status === 400 || e.status === 401
+      ? new Error('Your current password is not right.')
+      : new Error(e.message ?? 'The password could not be changed.');
+  const { error } = await ba
+    .changePassword({ currentPassword, newPassword, revokeOtherSessions: true })
+    .catch((e: { status?: number; message?: string }) => { throw wrong(e); });
+  if (error) throw wrong(error);
 }
 
 /** The team this user belongs to, creating one on first sign-in. */
@@ -140,7 +167,7 @@ export async function acceptInvite(token: string): Promise<Team> {
 }
 
 /**
- * Take a person out of the team. This is the Supabase half; their device keys
+ * Take a person out of the team. This is the Neon half; their device keys
  * live on the relay and are revoked through `/api/members/:id/remove`, which
  * the console calls straight afterwards. Two steps, because a relay that
  * accepted a webhook from anywhere would be a worse trade.

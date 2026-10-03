@@ -16,8 +16,9 @@ knoot.dev, www.knoot.dev {
 	header {
 		# Every script is bundled and served from here (three.js and xterm
 		# included); only fonts come from elsewhere. `connect-src` covers the
-		# relay's own websocket and the console's sign-in against Supabase.
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' wss://knoot.dev wss://relay.knoot.dev https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'none'"
+		# relay's own websocket, and the console's sign-in and team reads against
+		# Neon Auth and the Neon Data API.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' wss://knoot.dev wss://relay.knoot.dev https://*.neon.tech; frame-ancestors 'none'; base-uri 'none'"
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 		# A token in a URL must never travel to another site in a Referer.

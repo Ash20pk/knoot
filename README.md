@@ -127,7 +127,7 @@ flowchart TB
   agent["<b>Coding agent</b><br/>[External system]<br/>Claude Code or Codex"]:::external
   knoot["<b>knoot</b><br/>[Software system]<br/>Shared memory, live awareness and<br/>write arbitration for a team's agents"]:::system
   git["<b>Git working tree</b><br/>[External system]<br/>The repository the agents edit"]:::external
-  supabase["<b>Supabase</b><br/>[External system]<br/>Identity for people using the console"]:::external
+  neon["<b>Neon</b><br/>[External system]<br/>Identity for people using the console"]:::external
   storage["<b>Object storage</b><br/>[External system]<br/>Off-box replica of the event log"]:::external
 
   dev -- "prompts" --> agent
@@ -136,7 +136,7 @@ flowchart TB
   dev -- "CLI: init, remember, who, why" --> knoot
   admin -- "console at /app" --> knoot
   knoot -- "status, branch, file hashes" --> git
-  knoot -- "verifies sign-in" --> supabase
+  knoot -- "verifies sign-in" --> neon
   knoot -- "replicates the log" --> storage
   classDef person fill:#08427b,stroke:#052e56,color:#fff
   classDef system fill:#1168bd,stroke:#0b4884,color:#fff
@@ -152,7 +152,7 @@ flowchart TB
 | **Coding agent** | Claude Code or Codex. Never calls knoot deliberately; its hooks do, and knoot answers with context or a denial. |
 | **Team admin** | Mints device keys, adds people, defines rooms — in the console or with `knoot member`. |
 | **Git working tree** | Source of the repo id (from `origin`), the branch, `.gitignore` and file hashes. Contents are hashed locally and never sent. |
-| **Supabase** | Optional. Only people signing in to the hosted console need it; machines authenticate with device keys and never touch it. |
+| **Neon** | Optional. Only people signing in to the hosted console need it; machines authenticate with device keys and never touch it. |
 | **Object storage** | Optional. Litestream replicates the relay's SQLite log there so losing the box loses seconds, not the log. |
 
 **The one finding the system is built on: pushed context works on the weakest
@@ -182,7 +182,7 @@ flowchart LR
     web["<b>Web app</b><br/>[Container: TypeScript, Vite]<br/>Site, docs, status, console;<br/>embedded in the binary"]:::container
   end
 
-  supabase["<b>Supabase</b><br/>[External system]<br/>People's identity"]:::external
+  neon["<b>Neon</b><br/>[External system]<br/>People's identity"]:::external
 
   agent -- "hook JSON on stdin" --> hook
   dev -- "runs" --> cli
@@ -191,7 +191,7 @@ flowchart LR
   daemon -- "events, claims, shards<br/>WebSocket /ws" --> relay
   relay -- "reads, appends" --> db
   web -- "HTTPS /api, WebSocket" --> relay
-  relay -- "verifies tokens" --> supabase
+  relay -- "verifies tokens" --> neon
   classDef person fill:#08427b,stroke:#052e56,color:#fff
   classDef system fill:#1168bd,stroke:#0b4884,color:#fff
   classDef container fill:#438dd5,stroke:#2e6295,color:#fff
@@ -341,7 +341,7 @@ flowchart LR
   end
 
   db[("<b>relay.db</b><br/>[SQLite]")]:::db
-  supabase["<b>Supabase</b><br/>[External system]"]:::external
+  neon["<b>Neon</b><br/>[External system]"]:::external
 
   daemon -- "WebSocket /ws" --> ws
   console -- "HTTPS" --> api
@@ -352,7 +352,7 @@ flowchart LR
   ws -- "MLS messages" --> ds
   api --> teams
   api -- "console sign-in" --> cloud
-  cloud --> supabase
+  cloud --> neon
   ws -- "append events" --> db
   store --> db
   teams --> db
@@ -372,7 +372,7 @@ flowchart LR
 | **Memory store** | `src/memory.rs` | Stores ciphertext plus what it needs to route: scope, kind, author, epoch, a blinded name for uniqueness. Facts kept 90 days, cache 14, session context for the session. 64 KiB per shard, budget per scope. |
 | **MLS delivery service** | `src/relay.rs`, `mls_log` | Orders commits, welcomes and key packages for each room's group. Can read none of them. |
 | **Teams and devices** | `src/teams.rs`, `src/rooms.rs` | A key is a **device**, belonging to a **member**, who is in **rooms**; a room grants `(repo, area)` pairs. Keys are stored as SHA-256 hashes and resolved locally with no network call, so the hot path works when everything else is down. Registration is rate-limited per IP. |
-| **People's identity** | `src/cloud.rs` | Only when Supabase is configured. Exchanges a console session for a user and team. Handles both `sb_secret_…` keys and the legacy JWTs Supabase retires at the end of 2026. |
+| **People's identity** | `src/cloud.rs` | Only when Neon is configured. Verifies a console JWT against Neon Auth's published keys, then reads the person's team through the Data API with their own token, so row-level security bounds it. Holds no database secret. |
 | **Lab terminals** | `src/term.rs` | Real `claude` sessions in PTYs, bridged to xterm.js. Spawned only with `--lab-dir`, and gated by the relay's own secret — a terminal is a shell on the host. |
 
 ### What the components do together
@@ -574,13 +574,16 @@ publishes a versioned release, which is what `install.sh` takes by default.
 
 ### Configuration
 
-Three places hold configuration, and the split is the security boundary:
+Three places hold the Neon URLs. None of them is a secret: the browser signs
+in against Neon Auth, the Data API answers only what row-level security allows
+the signed-in person, and the relay checks the same JWT against Neon Auth's
+published keys. There is no service key anywhere.
 
 | Where | What goes there | Why |
 |---|---|---|
-| `web/.env` (gitignored) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Local development; Vite reads it at build time |
-| GitHub Actions secrets | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Baked into the released binary's front end |
-| `/etc/knoot/supabase.env` on the relay host, 0600 | the above plus `SUPABASE_SECRET_KEY` | The relay resolves team membership at run time |
+| `web/.env` (gitignored) | `VITE_NEON_AUTH_URL`, `VITE_NEON_DATA_API_URL` | Local development; Vite reads it at build time |
+| GitHub Actions variables | `NEON_AUTH_URL`, `NEON_DATA_API_URL` | Baked into the released binary's front end |
+| `/etc/knoot/neon.env` on the relay host | `NEON_AUTH_URL`, `NEON_DATA_API_URL` | The relay verifies sign-in and resolves team membership at run time |
 
 | Variable | Read by | Effect |
 |---|---|---|
@@ -590,9 +593,11 @@ Three places hold configuration, and the split is the security boundary:
 | `KNOOT_BIN` | hooks | where the binary is, if not on `PATH` |
 | `KNOOT_USER` | CLI | local session name for mail; authorship always comes from the device key |
 
-Without Supabase the relay still runs and device keys still work; the console
-says sign-in is not configured. Apply `supabase/migrations` in order when you
-do attach one.
+Without Neon the relay still runs and device keys still work; the console
+says sign-in is not configured. To attach a project, enable Neon Auth and the
+Data API on its branch (`neon neon-auth enable`, `neon data-api create
+--auth-provider neon_auth`), apply `db/migrations` in order as the owner role,
+then `neon data-api refresh-schema`.
 
 ---
 

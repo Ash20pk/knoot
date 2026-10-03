@@ -37,14 +37,14 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       # `build`, not `build:oss`: the release binary is the hosted one and gets
-      # the real publishable key. The dist committed to the repository is built
-      # keyless, so `cargo install --git` never inherits someone's project.
+      # the real Neon URLs. The dist committed to the repository is built
+      # without them, so `cargo install --git` never inherits someone's project.
       - name: Typecheck and build the web front end
         env:
-          # The publishable key is public by design and ends up in the bundle.
-          # The secret key is never built in; the relay reads it at run time.
-          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          # Both are public URLs and end up in the bundle; there is no key.
+          # Repository variables, not secrets, for that reason.
+          VITE_NEON_AUTH_URL: ${{ vars.NEON_AUTH_URL }}
+          VITE_NEON_DATA_API_URL: ${{ vars.NEON_DATA_API_URL }}
         run: |
           npm --prefix web ci
           npm --prefix web run typecheck

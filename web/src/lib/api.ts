@@ -1,15 +1,15 @@
 import { RELAY_WS } from './relay';
-import { supabase } from './supabase';
+import { neon } from './neon';
 
 /**
  * The relay is the source of truth for anything an agent needs when the
  * network is bad: the event log, live claims, and agent-token hashes. It
- * accepts either an agent token or a signed-in person's Supabase access
- * token, so the console authenticates as the person, never as a machine.
+ * accepts either an agent token or a signed-in person's Neon Auth JWT, so
+ * the console authenticates as the person, never as a machine.
  */
 export async function accessToken(): Promise<string> {
-  if (!supabase) throw new Error('Sign-in is not configured on this deployment.');
-  const { data } = await supabase.auth.getSession();
+  if (!neon) throw new Error('Sign-in is not configured on this deployment.');
+  const { data } = await neon.auth.getSession();
   const t = data.session?.access_token;
   if (!t) throw new Error('Your session has expired. Sign in again.');
   return t;
