@@ -601,8 +601,8 @@ pub fn intents_overlap_beyond(
 
 pub fn paths_overlap(a: &str, b: &str) -> bool {
     a == b
-        || a.strip_prefix(b).map_or(false, |r| r.starts_with('/'))
-        || b.strip_prefix(a).map_or(false, |r| r.starts_with('/'))
+        || a.strip_prefix(b).is_some_and(|r| r.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|r| r.starts_with('/'))
 }
 
 /// Materialized view of the log: live claims + sessions. Used by both
@@ -1536,7 +1536,7 @@ mod tests {
         let mut v = View::default();
         v.apply(&Event::FileWritten { session: "s1".into(), user: "priya".into(), path: "a.rs".into(), ts: now_ms() });
         v.apply(&Event::SessionEnded { session: "s1".into(), ts: now_ms() });
-        assert!(v.sessions.get("s1").is_none());
+        assert!(!v.sessions.contains_key("s1"));
         assert_eq!(v.authors.get("s1").map(String::as_str), Some("priya"));
     }
 

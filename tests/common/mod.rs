@@ -3,7 +3,7 @@
 
 use knoot::proto::*;
 use futures_util::{SinkExt, StreamExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
@@ -100,14 +100,14 @@ impl Client {
 }
 
 /// Write a .knoot.toml so the daemon treats `root` as a knoot repo.
-pub fn init_repo(root: &PathBuf, relay: &str, repo: &str) {
+pub fn init_repo(root: &Path, relay: &str, repo: &str) {
     knoot::config::RepoConfig { relay: relay.into(), repo: repo.into(), hubs: Vec::new(), areas: Vec::new() }
         .save(root)
         .unwrap();
 }
 
 /// As `init_repo`, plus the hub paths the repo declares.
-pub fn init_repo_with_hubs(root: &PathBuf, relay: &str, repo: &str, hubs: &[&str]) {
+pub fn init_repo_with_hubs(root: &Path, relay: &str, repo: &str, hubs: &[&str]) {
     knoot::config::RepoConfig {
         relay: relay.into(),
         repo: repo.into(),
@@ -120,7 +120,7 @@ pub fn init_repo_with_hubs(root: &PathBuf, relay: &str, repo: &str, hubs: &[&str
 
 /// As `init_repo`, plus the areas the repo divides itself into.
 pub fn init_repo_with_areas(
-    root: &PathBuf,
+    root: &Path,
     relay: &str,
     repo: &str,
     areas: &[(&str, &[&str])],
@@ -182,8 +182,8 @@ pub async fn start_daemon() -> PathBuf {
 }
 
 /// Blocking daemon call from an async test, off the runtime threads.
-pub async fn ask(sock: &PathBuf, req: DReq) -> Option<DResp> {
-    let (sock, req) = (sock.clone(), req);
+pub async fn ask(sock: &Path, req: DReq) -> Option<DResp> {
+    let (sock, req) = (sock.to_path_buf(), req);
     tokio::task::spawn_blocking(move || knoot::hook::call_daemon_at(&sock, &req))
         .await
         .unwrap()
@@ -259,7 +259,7 @@ pub fn watch_ungated(url: &str, repo: &str) -> std::sync::Arc<std::sync::atomic:
 }
 
 /// Blocking daemon call from a sync test context.
-pub fn ask_daemon(sock: &PathBuf, req: DReq) -> Option<DResp> {
+pub fn ask_daemon(sock: &Path, req: DReq) -> Option<DResp> {
     knoot::hook::call_daemon_at(sock, &req)
 }
 

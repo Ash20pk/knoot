@@ -57,7 +57,7 @@ fn denied(out: &Option<Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn tool(root: &PathBuf, session: &str, event: &str, tool: &str, rel: &str) -> Value {
+fn tool(root: &Path, session: &str, event: &str, tool: &str, rel: &str) -> Value {
     json!({
         "hook_event_name": event,
         "session_id": session,
@@ -67,7 +67,7 @@ fn tool(root: &PathBuf, session: &str, event: &str, tool: &str, rel: &str) -> Va
     })
 }
 
-fn bash(root: &PathBuf, session: &str, event: &str, command: &str) -> Value {
+fn bash(root: &Path, session: &str, event: &str, command: &str) -> Value {
     json!({
         "hook_event_name": event,
         "session_id": session,
@@ -77,7 +77,7 @@ fn bash(root: &PathBuf, session: &str, event: &str, command: &str) -> Value {
     })
 }
 
-fn prompt(root: &PathBuf, session: &str, text: &str) -> Value {
+fn prompt(root: &Path, session: &str, text: &str) -> Value {
     json!({
         "hook_event_name": "UserPromptSubmit",
         "session_id": session,
@@ -103,7 +103,7 @@ async fn scenario_hubs(tag: &str, hubs: &[&str]) -> (PathBuf, PathBuf, String) {
 /// always fire `SessionStart`; a session the daemon has only ever seen write
 /// is attributed to the OS user, which is the documented fallback and not what
 /// these tests are about.
-fn joins(sock: &Path, root: &PathBuf, session: &str, user: &str) {
+fn joins(sock: &Path, root: &Path, session: &str, user: &str) {
     hook_as(
         sock,
         json!({
@@ -116,14 +116,14 @@ fn joins(sock: &Path, root: &PathBuf, session: &str, user: &str) {
 }
 
 /// One session writes a file, having claimed it and then let it go.
-fn peer_writes(sock: &Path, root: &PathBuf, session: &str, user: &str, rel: &str) {
+fn peer_writes(sock: &Path, root: &Path, session: &str, user: &str, rel: &str) {
     joins(sock, root, session, user);
     std::fs::write(root.join(rel), "peer content\n").unwrap();
     hook_as(sock, tool(root, session, "PreToolUse", "Edit", rel), user);
     hook_as(sock, tool(root, session, "PostToolUse", "Edit", rel), user);
 }
 
-fn release(sock: &Path, root: &PathBuf, session: &str, user: &str) {
+fn release(sock: &Path, root: &Path, session: &str, user: &str) {
     hook_as(
         sock,
         json!({

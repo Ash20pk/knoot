@@ -126,7 +126,7 @@ fn told(out: &Option<Value>) -> String {
         .join("\n")
 }
 
-fn joins(sock: &Path, root: &PathBuf, session: &str, user: &str) {
+fn joins(sock: &Path, root: &Path, session: &str, user: &str) {
     hook_as(
         sock,
         json!({ "hook_event_name": "SessionStart", "session_id": session, "cwd": root.to_string_lossy() }),
@@ -134,7 +134,7 @@ fn joins(sock: &Path, root: &PathBuf, session: &str, user: &str) {
     );
 }
 
-fn reads(sock: &Path, root: &PathBuf, session: &str, user: &str, rel: &str) {
+fn reads(sock: &Path, root: &Path, session: &str, user: &str, rel: &str) {
     hook_as(
         sock,
         json!({
@@ -146,7 +146,7 @@ fn reads(sock: &Path, root: &PathBuf, session: &str, user: &str, rel: &str) {
     );
 }
 
-fn prompt(sock: &Path, root: &PathBuf, session: &str, user: &str, text: &str) -> String {
+fn prompt(sock: &Path, root: &Path, session: &str, user: &str, text: &str) -> String {
     told(&hook_as(
         sock,
         json!({
@@ -157,7 +157,7 @@ fn prompt(sock: &Path, root: &PathBuf, session: &str, user: &str, text: &str) ->
     ))
 }
 
-fn pre_write(sock: &Path, root: &PathBuf, session: &str, user: &str, rel: &str) -> String {
+fn pre_write(sock: &Path, root: &Path, session: &str, user: &str, rel: &str) -> String {
     told(&hook_as(
         sock,
         json!({
@@ -170,7 +170,7 @@ fn pre_write(sock: &Path, root: &PathBuf, session: &str, user: &str, rel: &str) 
 }
 
 /// `knoot plan`, as an agent would run it: on purpose, for a named session.
-fn plan(sock: &Path, root: &PathBuf, session: &str, args: &[&str]) -> String {
+fn plan(sock: &Path, root: &Path, session: &str, args: &[&str]) -> String {
     let out = Command::new(BIN)
         .arg("plan")
         .args(args)
@@ -182,7 +182,7 @@ fn plan(sock: &Path, root: &PathBuf, session: &str, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
-fn cache_entry(sock: &Path, root: &PathBuf, args: &[&str]) -> String {
+fn cache_entry(sock: &Path, root: &Path, args: &[&str]) -> String {
     let out = Command::new(BIN)
         .arg("cache")
         .args(args)
@@ -193,7 +193,7 @@ fn cache_entry(sock: &Path, root: &PathBuf, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
-fn ends(sock: &Path, root: &PathBuf, session: &str, user: &str) {
+fn ends(sock: &Path, root: &Path, session: &str, user: &str) {
     hook_as(
         sock,
         json!({ "hook_event_name": "SessionEnd", "session_id": session, "cwd": root.to_string_lossy() }),
@@ -202,7 +202,7 @@ fn ends(sock: &Path, root: &PathBuf, session: &str, user: &str) {
 }
 
 /// `knoot remember`, as a person or an agent would run it.
-fn remember(sock: &Path, root: &PathBuf, args: &[&str]) -> String {
+fn remember(sock: &Path, root: &Path, args: &[&str]) -> String {
     let out = Command::new(BIN)
         .arg("remember")
         .args(args)
@@ -213,7 +213,7 @@ fn remember(sock: &Path, root: &PathBuf, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
-fn recall(sock: &Path, root: &PathBuf) -> String {
+fn recall(sock: &Path, root: &Path) -> String {
     let out = Command::new(BIN)
         .arg("recall")
         .current_dir(root)

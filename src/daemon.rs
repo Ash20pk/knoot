@@ -109,6 +109,9 @@ impl RepoConn {
 }
 
 /// What a session's in-flight Bash command is expected to touch.
+/// A path a patch said would stop existing, and whether it was a move.
+type PatchRemoval = (String, bool);
+
 struct PendingBash {
     /// Paths the command is expected to delete or move away, and whether it
     /// was a move. Checked after the fact — a `rm` that failed deleted
@@ -161,7 +164,7 @@ struct Daemon {
     turns: Mutex<HashMap<(String, String), Ts>>,
     /// Paths a `PreWriteBatch` said would stop existing, keyed by (repo_root,
     /// session), confirmed and announced from `PostWriteBatch` once they have.
-    patch_removals: Mutex<HashMap<(String, String), Vec<(String, bool)>>>,
+    patch_removals: Mutex<HashMap<(String, String), Vec<PatchRemoval>>>,
 }
 
 pub async fn run() -> Result<()> {
@@ -960,13 +963,13 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                 .map(|h| {
                     let stale = crate::memory::staleness(h, &last_write, &lookup, Some(root));
                     format!(
-                        "[{}] {}\n  {}\n  — {}, {}{}{}",
+                        "[{}] {}\n  {}\n  — {}, {} ago{}{}",
                         h.shard.kind,
                         h.fact.name,
                         h.fact.text,
                         h.shard.author_email,
                         // `ago` takes an elapsed duration, not an instant.
-                        format!("{} ago", ago(now_ms().saturating_sub(h.shard.created_ts))),
+                        ago(now_ms().saturating_sub(h.shard.created_ts)),
                         if h.fact.paths.is_empty() {
                             String::new()
                         } else {

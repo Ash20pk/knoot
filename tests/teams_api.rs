@@ -90,7 +90,7 @@ async fn registering_returns_a_token_that_opens_the_team() {
     assert_eq!(team["team"], "Acme");
     assert_eq!(team["tokens"].as_array().unwrap().len(), 1);
     assert!(
-        team.to_string().find(&tok).is_none(),
+        !team.to_string().contains(&tok),
         "the team view must never echo a working secret back"
     );
 }

@@ -61,7 +61,7 @@ fn denied(out: &Option<Value>) -> bool {
 
 /// The fields Codex puts on every turn-scoped hook payload. `transcript_path`
 /// is present because Codex sends it; knoot must never open it.
-fn envelope(root: &PathBuf, session: &str, event: &str) -> Value {
+fn envelope(root: &Path, session: &str, event: &str) -> Value {
     json!({
         "hook_event_name": event,
         "session_id": session,
@@ -74,7 +74,7 @@ fn envelope(root: &PathBuf, session: &str, event: &str) -> Value {
 }
 
 /// An `apply_patch` call as Codex serialises it: the patch is the command.
-fn patch(root: &PathBuf, session: &str, event: &str, body: &str) -> Value {
+fn patch(root: &Path, session: &str, event: &str, body: &str) -> Value {
     let mut v = envelope(root, session, event);
     v["tool_name"] = json!("apply_patch");
     v["matcher_aliases"] = json!(["Write", "Edit"]);
@@ -83,20 +83,20 @@ fn patch(root: &PathBuf, session: &str, event: &str, body: &str) -> Value {
     v
 }
 
-fn bash(root: &PathBuf, session: &str, event: &str, command: &str) -> Value {
+fn bash(root: &Path, session: &str, event: &str, command: &str) -> Value {
     let mut v = envelope(root, session, event);
     v["tool_name"] = json!("Bash");
     v["tool_input"] = json!({ "command": command });
     v
 }
 
-fn prompt(sock: &Path, root: &PathBuf, session: &str, user: &str, text: &str) -> String {
+fn prompt(sock: &Path, root: &Path, session: &str, user: &str, text: &str) -> String {
     let mut v = envelope(root, session, "UserPromptSubmit");
     v["prompt"] = json!(text);
     told(&hook_as(sock, v, user))
 }
 
-fn joins(sock: &Path, root: &PathBuf, session: &str, user: &str) {
+fn joins(sock: &Path, root: &Path, session: &str, user: &str) {
     let mut v = envelope(root, session, "SessionStart");
     v["source"] = json!("startup");
     hook_as(sock, v, user);
@@ -119,7 +119,7 @@ async fn scenario(tag: &str) -> (PathBuf, PathBuf, String) {
     (sock, root, url)
 }
 
-fn seed(root: &PathBuf, rel: &str) {
+fn seed(root: &Path, rel: &str) {
     let p = root.join(rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(p, "seed\n").unwrap();

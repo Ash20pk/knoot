@@ -53,7 +53,7 @@ fn run(mut cmd: Command, payload: Value) -> Option<Value> {
     }
 }
 
-fn edit(root: &PathBuf, session: &str, rel: &str, event: &str) -> Value {
+fn edit(root: &Path, session: &str, rel: &str, event: &str) -> Value {
     json!({
         "hook_event_name": event,
         "session_id": session,
@@ -463,6 +463,7 @@ async fn relay_restart_is_survived_by_the_daemon() {
         }
     }
     relay.kill().ok();
+    relay.wait().ok();
     assert!(enforced, "daemon must reconnect after relay restart and enforce again");
 }
 
@@ -1190,7 +1191,7 @@ async fn a_granted_claim_is_logged_exactly_once() {
 }
 
 /// The denial text a session is handed when it tries to edit `path`.
-fn brief_for(sock: &Path, root: &PathBuf, session: &str, path: &str) -> Option<String> {
+fn brief_for(sock: &Path, root: &Path, session: &str, path: &str) -> Option<String> {
     let out = hook(sock, edit(root, session, path, "PreToolUse"))?;
     out["hookSpecificOutput"]["permissionDecisionReason"]
         .as_str()
