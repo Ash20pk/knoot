@@ -5,12 +5,17 @@
 // Rendered with three.js on WebGPU. WebGPURenderer falls back to WebGL2 on
 // its own when the browser has no WebGPU; when it has neither, the figure is
 // removed rather than left as a blank panel.
+//
+// Pointing at it does two things and neither changes the story: the camera
+// leans a few degrees toward the pointer and settles back, damped, when it
+// leaves; and the file under the pointer names itself and its state.
 
 import {
   AmbientLight, BoxGeometry, Color, DirectionalLight, InstancedMesh,
   Line, LineBasicMaterial, Mesh, MeshStandardMaterial, Object3D,
   OrthographicCamera, PlaneGeometry, QuadraticBezierCurve3, RingGeometry,
   Scene, Vector3, WebGPURenderer, BufferGeometry, MeshBasicMaterial, DoubleSide,
+  Raycaster, Vector2,
 } from 'three/webgpu';
 
 const PANEL = 0x171c21;
@@ -20,6 +25,12 @@ const HELD = 0x19a974;
 const BLOCKED = 0xff4a1f;
 const WIRE = 0x3b7bff;
 const AGENT = 0xe8ecef;
+const SLAB_HOVER = 0x3a444d;
+
+// Who holds each file the scenario touches, so a hovered slab can say so.
+const HOLDER: Record<string, string> = {
+  'src/auth.js': 'ash', 'src/session.js': 'ash', 'src/tokens.js': 'priya',
+};
 
 // The tree, in path order. The three files the scenario touches are named;
 // the rest are there so the repository reads as a real one.
@@ -67,6 +78,7 @@ export async function mountField(host: HTMLElement): Promise<void> {
     return;
   }
   renderer.setClearColor(PANEL, 1);
+  renderer.shadowMap.enabled = true;
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   host.querySelector('.field-stage')!.appendChild(canvas);
 
@@ -80,20 +92,29 @@ export async function mountField(host: HTMLElement): Promise<void> {
   cam.lookAt(0, 0.3, 0);
 
   scene.add(new AmbientLight(0xffffff, 1.6));
+  // The one light casts the only shadow: a raised file grounds itself on the
+  // plane, so height reads as height rather than as a brighter square.
   const sun = new DirectionalLight(0xffffff, 2.2);
   sun.position.set(-4, 8, 6);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 30 });
+  sun.shadow.bias = -0.0005;
   scene.add(sun);
 
   // The plane the files sit on, and a fine rule under each row.
   const floor = new Mesh(new PlaneGeometry(80, 80), new MeshStandardMaterial({ color: 0x1b2127, roughness: 1 }));
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -0.09;
+  floor.receiveShadow = true;
   scene.add(floor);
 
   // Files: one instanced mesh, colour per instance.
   const slabGeo = new BoxGeometry(0.86, 0.12, 0.86);
   const slabMat = new MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
   const slabs = new InstancedMesh(slabGeo, slabMat, FILES.length);
+  slabs.castShadow = true;
+  slabs.receiveShadow = true;
   const dummy = new Object3D(), col = new Color();
   const slabHeight = new Float32Array(FILES.length).fill(0);
   const slabColor = FILES.map(() => new Color(SLAB));
@@ -120,6 +141,7 @@ export async function mountField(host: HTMLElement): Promise<void> {
   const mkAgent = (name: string, x: number, z: number): Agent => {
     const node = new Mesh(agentGeo, new MeshStandardMaterial({ color: AGENT, roughness: 0.6 }));
     node.position.set(x, 0.45, z);
+    node.castShadow = true;
     scene.add(node);
     const el = document.createElement('span');
     el.className = 'field-label'; el.textContent = name;
@@ -155,6 +177,23 @@ export async function mountField(host: HTMLElement): Promise<void> {
     line.geometry.setDrawRange(0, Math.max(2, Math.round(40 * Math.min(1, t)) + 1));
   };
   const wAsh = wire(HELD), wAsh2 = wire(HELD), wPriya = wire(BLOCKED), wPriya2 = wire(HELD), wMsg = wire(WIRE);
+
+  // Where the pointer is over the stage, in [-1, 1], and where the camera has
+  // got to in following it. `lean` chases `aim`, damped, every frame.
+  const aim = new Vector2(), lean = new Vector2();
+
+  // The file under the pointer: its slab lightens and a label names it.
+  let hovered = -1;
+  const hoverLabel = document.createElement('span');
+  hoverLabel.className = 'field-label file hover';
+  hoverLabel.hidden = true;
+  labels.appendChild(hoverLabel);
+  const stateOf = (i: number) => {
+    const c = slabColor[i].getHex(), f = FILES[i];
+    if (c === HELD) return `${f} · held by ${HOLDER[f]}`;
+    if (c !== SLAB) return `${f} · held by ash · priya denied`;
+    return `${f} · free`;
+  };
 
   const status = host.querySelector<HTMLElement>('.field-status')!;
   let lastStatus = '';
@@ -237,7 +276,7 @@ export async function mountField(host: HTMLElement): Promise<void> {
       slabPos(i, dummy.position); dummy.position.y = slabHeight[i];
       dummy.updateMatrix(); slabs.setMatrixAt(i, dummy.matrix);
       col.copy(slabColor[i]);
-      if (col.getHex() === SLAB && Math.floor(i / COLS) === 1) col.setHex(SLAB_LIT);
+      if (col.getHex() === SLAB) col.setHex(i === hovered ? SLAB_HOVER : Math.floor(i / COLS) === 1 ? SLAB_LIT : SLAB);
       slabs.setColorAt(i, col);
     }
     slabs.instanceMatrix.needsUpdate = true;
@@ -248,14 +287,25 @@ export async function mountField(host: HTMLElement): Promise<void> {
       a.node.position.copy(a.home);
       a.node.position.y += Math.sin(t * 1.3 + a.home.x) * 0.02;
     }
-    // Camera drifts a few degrees over the loop, never enough to feel like motion.
+    // Camera drifts a few degrees over the loop, never enough to feel like
+    // motion, and leans toward the pointer by as much again.
     const drift = Math.sin((t / LOOP) * Math.PI * 2) * 0.35;
-    cam.position.set(9 + drift, 9, 11 - drift);
+    const yaw = lean.x * 0.12, rise = lean.y * 0.9;
+    const bx = 9 + drift, bz = 11 - drift;
+    cam.position.set(
+      bx * Math.cos(yaw) - bz * Math.sin(yaw), 9 + rise, bx * Math.sin(yaw) + bz * Math.cos(yaw),
+    );
     cam.lookAt(0, 0.3, 0);
   };
 
   const project = () => {
     const w = canvas.clientWidth, h = canvas.clientHeight;
+    hoverLabel.hidden = hovered < 0;
+    if (hovered >= 0) {
+      hoverLabel.textContent = stateOf(hovered);
+      const p = slabPos(hovered).setY(slabHeight[hovered] + 0.1).project(cam);
+      hoverLabel.style.transform = `translate(${((p.x + 1) / 2) * w}px, ${((1 - p.y) / 2) * h - 26}px)`;
+    }
     for (const a of agents) {
       const p = a.node.position.clone(); p.y += 0.75;
       p.project(cam);
@@ -277,20 +327,47 @@ export async function mountField(host: HTMLElement): Promise<void> {
   resize();
   new ResizeObserver(resize).observe(host);
 
-  // Reduced motion: one still, at the moment the scenario is fullest.
+  const ray = new Raycaster(), ndc = new Vector2();
+  const pick = (e: PointerEvent) => {
+    const b = canvas.getBoundingClientRect();
+    ndc.set(((e.clientX - b.left) / b.width) * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam);
+    const hit = ray.intersectObject(slabs, false)[0];
+    return hit?.instanceId ?? -1;
+  };
+
+  // Reduced motion: one still, at the moment the scenario is fullest. Hover
+  // still names files; it redraws that still and moves nothing.
   if (reduced) {
-    frame(T.reply + 0.6);
-    renderer.render(scene, cam);
-    project();
+    const still = () => { frame(T.reply + 0.6); renderer.render(scene, cam); project(); };
+    canvas.addEventListener('pointermove', (e) => {
+      const i = pick(e);
+      if (i !== hovered) { hovered = i; still(); }
+    });
+    canvas.addEventListener('pointerleave', () => { if (hovered >= 0) { hovered = -1; still(); } });
+    still();
     return;
   }
+
+  canvas.addEventListener('pointermove', (e) => {
+    const b = canvas.getBoundingClientRect();
+    aim.set(((e.clientX - b.left) / b.width) * 2 - 1, ((e.clientY - b.top) / b.height) * 2 - 1);
+    hovered = pick(e);
+  });
+  canvas.addEventListener('pointerleave', () => { aim.set(0, 0); hovered = -1; });
 
   let visible = true;
   new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.05 }).observe(host);
   const t0 = performance.now();
+  let last = t0;
   const loop = async () => {
+    const now = performance.now();
+    // Frame-rate independent damping, and no lurch after a hidden tab.
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
     if (visible && !document.hidden) {
-      const t = ((performance.now() - t0) / 1000) % LOOP;
+      lean.lerp(aim, 1 - Math.exp(-dt * 4));
+      const t = ((now - t0) / 1000) % LOOP;
       frame(t);
       renderer.render(scene, cam);
       project();
