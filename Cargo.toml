@@ -2,7 +2,13 @@
 name = "knoot"
 version = "0.1.0"
 edition = "2021"
-description = "Realtime coordination layer for coding agents — a sequenced event log with claims, leases, and conflict briefs."
+description = "Shared memory and live awareness for a team's coding agents — facts that reach the next agent unasked and are flagged when their files change."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Ash20pk/knoot"
+homepage = "https://knoot.dev"
+readme = "README.md"
+keywords = ["agents", "claude-code", "codex", "coordination", "memory"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1"
