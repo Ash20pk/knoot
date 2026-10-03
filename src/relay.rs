@@ -2338,7 +2338,7 @@ mod auth_tests {
         assert!(id.may_enter("api", "/"), "the general room covers the whole repo");
     }
 
-    /// The fail-open, works-unconfigured property in REPORT.md is load-bearing
+    /// The fail-open, works-unconfigured property in the README is load-bearing
     /// and members must not have touched it: a loopback relay with no setup
     /// still hands out an identity, and that identity can still work.
     #[tokio::test]

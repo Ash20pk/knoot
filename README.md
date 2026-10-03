@@ -7,398 +7,85 @@ A fact one agent worked out reaches the next one on the turn it opens the same
 code, without anyone running a command. A fact names the files it is about, so
 when a colleague changes one of them the fact is flagged *possibly stale* and
 says who moved it. What a session is doing right now reaches every peer in the
-same part of the repo before their paths overlap. And because the same hook sees
-every write, the rare moment two agents do meet on one file is caught before
-git would report it.
+same part of the repo before their paths overlap. And because the same hook
+sees every write, the rare moment two agents do meet on one file is caught
+before git would report it.
 
 **If knoot breaks, your agents do not know.** Every failure path ends in an
 allowed write: relay unreachable, token refused, daemon dead, key missing,
-memory unreadable — the agent is told nothing and carries on. That is enforced
-by tests that fail the build if it stops being true, and it is why this can be
-installed on a repo people are actually paid to work in.
+memory unreadable — the agent is told nothing and carries on. Tests fail the
+build if that stops being true, which is why this can be installed on a repo
+people are actually paid to work in.
 
-Code never leaves your machine. Only paths, intent sentences, and the facts
-somebody chose to publish cross the wire — and under the `mls` provider the
+**Code never leaves your machine.** Only paths, intent sentences and the facts
+somebody chose to publish cross the wire — and under the `mls` key provider the
 relay cannot read even those.
 
-## Shared memory
+Works with **Claude Code** and **Codex**, through their native hooks: no MCP
+server, no tool the model has to think to call.
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh
+knoot daemon &                                 # one per machine
+cd your-repo && knoot init --relay wss://knoot.dev/ws
 knoot remember --name money --path src/billing.js "all money is integer cents; never floats"
 ```
 
-That is the whole interface for the person writing. For the agent reading there
-is no interface at all: on its next turn in `src/billing.js`, or anywhere under
-it, the fact is on its brief.
+The next agent to open `src/billing.js` has that fact on its brief.
 
-**This is measured, not hoped.** Four Haiku agents were given a billing task on
-a seeded repo that computed tax in floats. Nothing in the seed, the goal or the
-task list mentioned cents; the one fact above had been placed in memory. It
-reached three of the four unasked, and `billing.js` came out as
+---
 
-```js
-// Invoice calculation. All money values are in integer cents.
-const tax = Math.round(afterDiscount * taxRate);
-```
+## Contents
 
-with `discountCents`, no `parseFloat`, and a passing test called *"Money uses
-cents (no floats)"*. The weakest model in the room changed what it wrote because
-of something a teammate knew. (The same lab found the opposite for anything
-behind a command: agents told outright to run `knoot who` or `knoot plan` did
-not. Memory works because it is pushed.)
+This README follows the [C4 model](https://c4model.com): it starts with knoot
+as one box among the people and systems around it, then opens that box one
+level at a time. Diagrams use C4's notation — dark blue for people, blue for
+knoot's own system, containers and components, grey for external systems.
 
-### Three kinds, one shape
+1. [Getting started](#getting-started)
+2. [Level 1 — System context](#level-1--system-context): who uses knoot and what it talks to
+3. [Level 2 — Containers](#level-2--containers): the processes and stores that make it up
+4. [Level 3 — Components](#level-3--components): the modules inside each container, and what they do
+5. [Level 4 — Code](#level-4--code): the types and rules everything else is built on
+6. [Deployment](#deployment): a hosted relay, end to end
+7. [Operating a team](#operating-a-team)
+8. [Security model](#security-model)
+9. [CLI reference](#cli-reference)
+10. [Development](#development)
+11. [Known limitations](#known-limitations)
+12. [License](#license)
 
-| | what it is | who writes it | lives |
-|---|---|---|---|
-| **facts** | a durable statement written on purpose — a convention, a decision, a gotcha | a person or agent, `knoot remember` | 90 days, superseded chains kept |
-| **repo_cache** | something derived: where a symbol lives, how the tests run | `knoot cache` | 14 days, **dropped** the moment its files change |
-| **session_context** | what a session is doing now, and what it has settled | the daemon, every turn; `knoot plan` to say more | the session |
+---
 
-```sh
-knoot cache --name "how tests run" --path test.js "node test.js"
-knoot plan --path src/billing.js --decided "cents, not floats" "rewriting the tax rounding"
-knoot recall                                       # what this repo knows
-```
+## Getting started
 
-Every kind is scoped to an area of the repo, sealed on the machine that wrote
-it, and carries the person who wrote it — taken from their device key, not from
-what their client says about itself.
-
-### Knowing when a fact has gone wrong
-
-A memory system that knows when a fact was written can tell you it is old. One
-that knows which files it is about can tell you it is **wrong**, and name the
-person who made it so.
-
-Every fact records the paths it is about and a hash of each as it stood. A
-later write to one of those files marks the fact *⚠ possibly stale: priya
-changed src/billing.js since* — unless the file was written back byte for byte,
-in which case nothing was invalidated and the flag stays quiet. Facts are
-flagged and still shown, because a human wrote them on purpose and "who changed
-this" is exactly what the reader needs. Derived knowledge is simply dropped: it
-was mechanical, it is now wrong, and it is cheap to work out again.
-
-Writing the same `--name` again **supersedes** the earlier statement rather
-than standing beside it, so two agents contradicting each other produce one
-current answer and a record of what changed. It is never a dedupe: the case
-that matters is precisely a near-duplicate that says the opposite.
-
-### What a session is doing, without asking it
-
-Nobody has to run anything for `session_context`. Every turn, the daemon
-publishes what a session appears to be doing, composed from the intent it
-declared and the files it holds — both already on the log before the composer
-runs, so nothing new leaves the machine and nothing is summarised. It is marked
-as composed, and reads that way to a peer: *appears to be working on*, not a
-plan they wrote.
-
-`knoot plan` is what a capable agent adds on top. An intent is one line scraped
-from a prompt; a plan says what the approach is and what has already been
-settled, which is what stops a peer designing against work in progress. Once a
-session declares one, the daemon stops composing for it — a scrape must never
-overwrite a plan. Either way it appears at the top of every same-area session's
-next turn, and it is deleted the moment the session ends: a finished plan
-presented as a live one is worse than no plan.
-
-### What is never published
-
-Publishing is **refused**, and the attempt logged, when the text or its source
-file looks like a credential — anything `.gitignore`d, `.env*`, `*.pem`,
-`*.key`, `id_*`, a token prefix this project recognises, or a long unbroken
-key-shaped string. Nothing is derived from a transcript, ever: a free-text
-conclusion pulled out of a turn is an exfiltration path with no reviewer, and
-no amount of care about what gets extracted fixes that.
-
-### Who can read it
-
-Facts are sealed on the machine that writes them, through a key provider. The
-relay chooses, because sealing is a property of the deployment:
-
-- **`plaintext`** (default) stores shards readable. Right for a relay inside
-  your own network, where the box is the trust boundary. An integrity tag still
-  catches a store that swaps or loses rows.
-- **`mls`** (`KNOOT_KEY_PROVIDER=mls` on the relay) makes each room an MLS
-  group (RFC 9420, via OpenMLS). Each machine is a leaf; the key for an area's
-  memory is exported from the group and sent nowhere. The relay is the
-  Delivery Service — it orders handshake messages and can read neither those
-  nor a single shard. Removing someone moves the room to an epoch their laptop
-  cannot derive.
-
-`knoot status` says which provider is in use, and tells you when this machine
-is still waiting for a room's key.
-
-## Nothing sits behind a command
-
-The mechanism under all of this is one hook, fired on every turn, that puts
-onto the agent's context what it would otherwise have to ask for:
-
-- **what your peers are doing** — their plans, declared or composed, with the
-  files they are in and what they have settled
-- **what the team knows** — facts about the files this session has read or
-  claimed, each with its author and any staleness flag
-- **what has already been worked out** — cached answers about those files
-- **what moved under you** — files this session read that a peer has since
-  written, before the next write rather than at merge
-- **who is here** — every session and person on the repo, their branch, and
-  what they hold
-- **mail** — anything a peer or a release notification has for you
-
-Pushed context works on the weakest model; offered context is ignored by it.
-That is the single finding every part of knoot is built on. `knoot who`,
-`knoot recall` and `knoot msg` still exist for people and for capable models,
-and nothing depends on them.
-
-## Agents
-
-Two agents speak knoot's hook surface natively, with no MCP server and no
-tool the model has to think to call:
-
-| | edits | reads | hooks file |
-|---|---|---|---|
-| **Claude Code** | `Write` / `Edit` / `MultiEdit` / `NotebookEdit` | `Read` | `.claude/settings.json` |
-| **Codex** | `apply_patch` — one patch, several files | the shell | `.codex/hooks.json` |
-
-`knoot init` writes both files, committed alongside `.knoot.toml`, so a clone
-is enrolled for whichever agent the person who cloned it runs. Codex asks you
-to trust a repository's hooks once — `/hooks` inside Codex — and `init` says
-so. `knoot init --agent codex` or `--agent claude` writes one.
-
-The two are one room. A Codex session holds a file through a patch and a
-Claude Code session is denied it with the same brief — holder, intent, lease.
-A fact one wrote reaches the other on its next turn. A Claude Code session's
-plan appears at the top of a Codex session's next prompt.
-
-Three things had to be true of the Codex adapter that were free with Claude
-Code:
-
-- **A patch is checked as a unit.** One `apply_patch` may add, edit, move and
-  delete several files. Every path is tested against the mirror before any is
-  claimed, so a patch denied on its third file leaves no claim standing on its
-  first two — and `knoot why` never shows a session holding files it never
-  wrote.
-- **Deletions are announced once they have happened.** A patch that deletes
-  a file is recorded as a write before and as a removal after, and only if the
-  path is really gone: a patch that failed deleted nothing.
-- **Reads through the shell count.** Codex has no read tool; it runs `cat`,
-  `sed -n`, `grep`. A write is stale when what the agent read has since
-  changed, so those reads are parsed out of the command before it runs and
-  recorded — for Claude Code too, where auto mode prefers the shell. Only
-  paths that exist in the repo are recorded, and a read is advisory; it never
-  denies anything.
-- **Codex's sandbox blocks every socket, so messages go through a file.**
-  Codex runs the agent's own shell commands under a policy that permits writes
-  in the workspace and refuses every connect, unix or TCP — measured, not
-  assumed. Hooks run outside it and work; `knoot msg` from inside it fails
-  with *Operation not permitted*, and a live Codex session concluded knoot
-  was off. So the Codex brief says that is not what it means, and says how to
-  message instead: write the text to `.knoot/outbox/<user>` (or `all`) with
-  the edit tool, and the next hook — any hook — sends it and removes the file.
-  `init` adds `.knoot/` to `.gitignore`. The commands work too: `knoot msg`,
-  `knoot plan` and `knoot remember` tell a refused connect from a missing
-  socket, queue the request under `.knoot/spool/` in the first case, and the
-  next hook sends it — so a healthy daemon is never reported as not running,
-  and a fact an agent wanted to publish is published.
-  Claude Code's shell reaches the daemon and its brief carries none of this.
-
-Run live on 13 September 2026 — Codex CLI 0.154 and Claude Code on one file,
-against a real relay — Codex saw the peer from its turn-start brief before it
-was blocked, re-planned on the denial, matched a convention planted in memory,
-and after the fix coordinated through the outbox on the first try. The
-transcript quotes are under gap 8 in [GAPS.md](GAPS.md).
-
-Which agent is calling is stated on the installed command line (`knoot hook
---agent codex`) and, failing that, inferred from the payload — Codex's carries
-`turn_id` and `apply_patch`, Claude Code's carries neither. Everything below
-the shim is identical: one daemon, one relay protocol, one log. Adding a third
-agent is a matcher, a payload shape, and a test file.
-
-## What crosses the wire
-
-The rule is that **code never leaves your machine**. The relay sequences and
-stores what it is given; it should never be given anything worth stealing.
-What it is given, exhaustively — every field on every event and message in
-`src/proto.rs`:
-
-| leaves the machine | never leaves |
-|---|---|
-| repo-relative **paths** of files claimed, written, read-and-gone, created or removed | file **contents**, in any form |
-| the **repo id** (derived from the `origin` URL) and the **branch** name | diffs, patch hunks, `Write` bodies |
-| **session ids**, and the **person** behind them (from the device key) | shell **commands** — parsed locally; only the paths they touch are sent |
-| an **intent**: the first 160 characters of each prompt | tool **output** (`tool_response`) — never read |
-| **messages** sent with `knoot msg`, in your own words | the **transcript** — Codex sends its path; knoot never opens it |
-| **facts, plans and cache entries** somebody chose to publish — sealed on your machine, unreadable to the relay under `mls` | what a session *read* — kept in the daemon, never sent |
-| a SHA-256 of each file a fact names, inside the sealed shard | which lines changed, or how many |
-
-Two of those deserve a second look. The **intent** is prompt text: if someone
-pastes a stack trace into their first line, its first 160 characters reach
-peers. That is the one field that carries what a person typed, and it is
-capped and truncated for exactly that reason. And **facts** are whatever an
-agent or person wrote on purpose — which is why publishing is refused when
-the text or its source file looks like a credential, and why nothing is ever
-derived from a transcript.
-
-`the_transcript_and_tool_response_are_never_read` in `tests/codex.rs` asserts
-the second column on the bytes the relay stored, not on intent.
-
-## Quick start
+### Install
 
 ```sh
-cargo build --release            # → target/release/knoot
-# or take a prebuilt one from the nightly release: Linux x86_64 (static),
-# macOS Apple silicon, macOS Intel — put it on PATH as `knoot`
+curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh
+```
 
-knoot relay --listen 0.0.0.0:7420   # one shared relay (any box, or localhost)
+The installer takes the latest release for Linux x86_64 (static) or macOS
+(Apple silicon or Intel), verifies its SHA-256 and puts it in `~/.local/bin`.
+`KNOOT_VERSION=nightly` takes the newest build of `main`; `KNOOT_INSTALL=<dir>`
+installs elsewhere. Anywhere else, build from source:
+
+```sh
+cargo install --git https://github.com/Ash20pk/knoot
+```
+
+One binary is the relay, the daemon, the hook shim and the CLI. Agent hooks
+call it **by name**, so it must be on `PATH` — or set `KNOOT_BIN`.
+
+### Run it
+
+```sh
+knoot relay --listen 0.0.0.0:7420   # one shared relay for the team (or use knoot.dev)
 knoot daemon                        # one per machine
-cd your-repo && knoot init          # writes .knoot.toml + installs Claude Code hooks
+cd your-repo && knoot init          # writes .knoot.toml and installs hooks for Claude Code and Codex
 ```
 
-Restart your Claude Code sessions in that repo. Then:
-
-```sh
-knoot who      # who's active, what they're doing, what they hold
-```
-
-On a repo big enough that "everyone" is the wrong audience, divide it into
-areas — the unit of who can collide with whom. A room grants `(repo, area)`
-pairs, and a session is only told about work in the areas its key was granted.
-
-```sh
-knoot areas                                 # what this repo's subtrees are
-knoot areas --import-codeowners --write     # take them from CODEOWNERS
-```
-
-Declaring none is the normal case and means one area, `/`, holding the whole
-repo — exactly how every repo behaved before areas existed.
-
-## When two agents do meet on one file
-
-The same hook that carries memory sees every write, so the case memory is meant
-to prevent is caught when it happens anyway.
-
-```
-agents ──hooks──► knoot hook ──unix socket──► knootd ──websocket──► knoot relay
- (any terminal)     (shim)                    (local mirror)        (sequencer + arbitration)
-```
-
-- Every turn's writes auto-claim the touched files (10-minute leases, renewed
-  on activity, expired on crash — nothing can wedge the repo).
-- Before an edit, the hook checks the local mirror (microseconds) and acquires
-  through the relay (single-digit ms). A conflict on the **same branch** returns
-  a **conflict brief** — who holds the file, what they are doing, how long is
-  left — into the model's context so it re-plans instead of colliding. On a
-  **different branch** nothing is blocked: the brief says these files will meet
-  at merge, which is a merge conflict predicted hours before git reports it.
-- **A write is also checked against what the agent read.** A file it read and
-  reasoned about, that somebody else has since changed, is reported before the
-  next write — even when the file being written is nobody's. That is the half
-  of a conflict a lock cannot see, and it is advisory.
-- **Creations, deletions and duplicate tasks are reported too.** Two agents
-  creating one new file, a file deleted under someone who had read it, a peer
-  who declared the same task — the collisions a claim on an existing path is
-  blind to.
-- **Widely-shared files are queued, not owned.** A path several sessions want
-  inside half an hour, or one named in `hubs` in `.knoot.toml` such as
-  `package.json`, gets a two-minute lease and a denial that says how many are
-  ahead of you.
-
-In six lab runs with roles assigned, no unforced collision occurred: given
-lanes, agents stay in them. The block exists for the day they do not, and the
-evidence so far is that awareness prevents the collision before the lock has to.
-
-## Working with people, not only agents
-
-Claude Code sessions announce themselves through hooks. Anyone else — a
-teammate in VS Code, an agent under another tool — is invisible unless they say
-so:
-
-```sh
-knoot present --doing "rewriting the tax rounding by hand"
-```
-
-You appear in `knoot who` as a **person**, files you touch are held while you
-are in them, and anything addressed to you prints as it arrives. Agents are
-told something different about you than about each other: a person cannot be
-asked to release a file, so their brief says to pick different work rather than
-to wait.
-
-## Sessions talk to each other
-
-Blocking alone is not multiplayer. A blocked session used to wait on a lease it
-could not observe, and nobody told it when the work finished.
-
-**Release notifications.** Being denied registers interest in that path. When
-the holder releases it — explicitly, by ending, or by its lease expiring — every
-waiter is told, with what the holder was doing. Delivery uses the `Stop` hook:
-the moment an agent tries to end its turn, pending news sends it back to work,
-so notice arrives in real time rather than whenever the human next types. A
-per-user cap means a chatty peer can never keep a session spinning.
-
-**Direct messages.** Agents coordinate in their own words:
-
-```sh
-knoot msg priya "auth.js is yours, exports are stable"
-knoot msg all "goal is green, stop editing"
-knoot inbox                    # read and clear pending notes
-```
-
-Identity comes from `KNOOT_USER` (else `$USER`), not from a session id — Claude
-Code exposes no session id to the commands it runs, and assuming otherwise
-attributed every message to the OS user.
-
-## Why is this file like this?
-
-```sh
-knoot why src/response.js
-```
-
-```
-src/response.js
-    2m ago  sam@example.com set out to: normalise the error shape in response.js
-    2m ago  sam@example.com took it — "normalise the error shape in response.js"
-    2m ago  sam@example.com wrote it
-    1m ago  priya@example.com was blocked; sam@example.com held it
-    1m ago  sam@example.com said: "taking response.js, about 10 min"
-
-what the team knows about it:
-  [facts] error-shape
-    errors are {code, message}; never a bare string
-```
-
-Every event has always been on the log; this reads it back as one file's story
-— the claims, the denials, what people said to each other, and what the team
-has since decided about it.
-
-## Shell writes
-
-Bash is gated too, or the scheme would be optional: agents reach for `sed` and
-heredocs as readily as the Edit tool, and auto mode prefers Bash outright.
-
-`PreToolUse` parses the command for write targets — redirects, heredoc
-targets, `tee`, `sed -i`, `cp`/`mv`, `rm`, `dd of=` — and gates each one.
-Quoting is respected, and heredoc *bodies* are skipped: a body containing
-`(sum, i) => sum + i` would otherwise read `=>` as a redirect.
-
-What the parser cannot read — interpreters, build tools, anything unknown — is
-allowed but *audited*: the working tree is fingerprinted before and after, and
-any change landing on a peer's claim is recorded as `UngatedWrite`. That is
-detection, not prevention, and the dashboard labels it that way.
-
-## Enrolling a team
-
-```sh
-knoot init --relay wss://relay.example.com/ws   # once, by one person
-git add .knoot.toml .claude/settings.json .codex/hooks.json && git commit
-```
-
-All three files are meant to be committed. The hooks call `knoot` **by name**, so
-they resolve on every machine that has the binary on `PATH` — set `KNOOT_BIN`
-if yours lives somewhere unusual. Each teammate then needs three things: the
-binary, `knoot daemon` running, and `knoot login` if the relay requires a
-token.
-
-Because knoot fails open, a broken install looks exactly like a quiet one from
-inside an agent. `knoot status` is how a human tells the difference:
+Restart the agent sessions in that repo, then check it is really on:
 
 ```
 $ knoot status
@@ -411,382 +98,692 @@ $ knoot status
 coordination is on.
 ```
 
-Anything less than that prints what is wrong and the command that fixes it.
+Because knoot fails open, a broken install looks exactly like a quiet one from
+inside an agent. `knoot status` is how a human tells the difference; anything
+less than the above prints what is wrong and the command that fixes it.
 
-## Hosting it for a team
-
-The relay is unauthenticated by default, which is right for `127.0.0.1` and
-wrong for anything else. Give it a shared secret and it requires one:
-
-```sh
-KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) knoot relay --listen 0.0.0.0:7420
-```
-
-Each teammate stores that token once, per relay:
+### Use it
 
 ```sh
-knoot login --relay wss://relay.example.com/ws --token <token>   # ~/.knoot/credentials.toml, 0600
+knoot remember --name money --path src/billing.js "all money is integer cents"   # a fact
+knoot cache --name "how tests run" --path test.js "node test.js"                 # derived knowledge
+knoot plan --path src/billing.js --decided "cents, not floats" "rewriting tax rounding"
+knoot who                     # who is here, what they are doing, what they hold
+knoot why src/billing.js      # one file's story, read back from the log
+knoot recall                  # what this repo's memory holds
 ```
 
-`KNOOT_TOKEN` overrides it, for CI and containers. Tokens deliberately do
-**not** live in `.knoot.toml`: that file is committed so a clone is enrolled
-with no setup, and a secret must never ride along with it.
+None of these are needed by an agent. Everything they would print is pushed
+into the agent's context on every turn — that is the design.
 
-Use `wss://` off-machine — a bearer token over plaintext is a token anyone on
-the path can take. knoot speaks `wss://` directly; terminate TLS with a proxy
-in front of the relay, or at your load balancer.
+---
 
-**A relay that refuses you still fails open.** A rejected token means
-coordination is off, not that anyone is blocked: the daemon says so once, on
-stderr, and every edit is allowed. An operator's auth mistake cannot become an
-outage for the team.
+## Level 1 — System context
 
+```mermaid
+flowchart TB
+  dev["<b>Developer</b><br/>[Person]<br/>Runs coding agents on a shared repository"]:::person
+  admin["<b>Team admin</b><br/>[Person]<br/>Manages members, device keys and rooms"]:::person
+  agent["<b>Coding agent</b><br/>[External system]<br/>Claude Code or Codex"]:::external
+  knoot["<b>knoot</b><br/>[Software system]<br/>Shared memory, live awareness and<br/>write arbitration for a team's agents"]:::system
+  git["<b>Git working tree</b><br/>[External system]<br/>The repository the agents edit"]:::external
+  supabase["<b>Supabase</b><br/>[External system]<br/>Identity for people using the console"]:::external
+  storage["<b>Object storage</b><br/>[External system]<br/>Off-box replica of the event log"]:::external
 
-### A hosted relay, end to end
+  dev -- "prompts" --> agent
+  agent -- "fires hooks on every turn and tool call" --> knoot
+  knoot -. "briefs; denies conflicting writes" .-> agent
+  dev -- "CLI: init, remember, who, why" --> knoot
+  admin -- "console at /app" --> knoot
+  knoot -- "status, branch, file hashes" --> git
+  knoot -- "verifies sign-in" --> supabase
+  knoot -- "replicates the log" --> storage
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+  classDef db fill:#438dd5,stroke:#2e6295,color:#fff
+```
 
-`deploy/` provisions one on a fresh Ubuntu droplet — Caddy terminating TLS in
-front of a loopback-bound relay, systemd keeping it up, a token generated on
-the box and never in the repo:
+| Actor or system | Relationship to knoot |
+|---|---|
+| **Developer** | Runs agents; occasionally publishes a fact or asks `knoot why`. Can join as a person with `knoot present`. |
+| **Coding agent** | Claude Code or Codex. Never calls knoot deliberately; its hooks do, and knoot answers with context or a denial. |
+| **Team admin** | Mints device keys, adds people, defines rooms — in the console or with `knoot member`. |
+| **Git working tree** | Source of the repo id (from `origin`), the branch, `.gitignore` and file hashes. Contents are hashed locally and never sent. |
+| **Supabase** | Optional. Only people signing in to the hosted console need it; machines authenticate with device keys and never touch it. |
+| **Object storage** | Optional. Litestream replicates the relay's SQLite log there so losing the box loses seconds, not the log. |
+
+**The one finding the system is built on: pushed context works on the weakest
+model; offered context is ignored by it.** In lab runs, Haiku agents told
+outright to run `knoot who` never did — but a fact placed on their brief
+changed the code they wrote in three of four sessions, with no other source
+for it. So nothing an agent needs sits behind a command.
+
+---
+
+## Level 2 — Containers
+
+```mermaid
+flowchart LR
+  agent["<b>Coding agent</b><br/>[External system]<br/>Claude Code / Codex"]:::external
+  dev["<b>Developer</b><br/>[Person]"]:::person
+
+  subgraph machine["Developer machine — one per person"]
+    hook["<b>knoot hook</b><br/>[Container: Rust, one process per hook]<br/>Payload → daemon request;<br/>exits 0 on any failure"]:::container
+    cli["<b>knoot CLI</b><br/>[Container: Rust]<br/>init, status, remember,<br/>who, why, present"]:::container
+    daemon["<b>knootd</b><br/>[Container: Rust, tokio]<br/>Log mirror, memory cache,<br/>brief composer, MLS client"]:::container
+  end
+
+  subgraph server["Relay host — one per team"]
+    relay["<b>knoot relay</b><br/>[Container: Rust, axum]<br/>Sequencer and arbiter per repo,<br/>memory store, team API"]:::container
+    db[("<b>relay.db</b><br/>[SQLite, WAL]<br/>Event log, memory shards,<br/>teams, devices, rooms")]:::db
+    web["<b>Web app</b><br/>[Container: TypeScript, Vite]<br/>Site, docs, status, console;<br/>embedded in the binary"]:::container
+  end
+
+  supabase["<b>Supabase</b><br/>[External system]<br/>People's identity"]:::external
+
+  agent -- "hook JSON on stdin" --> hook
+  dev -- "runs" --> cli
+  hook -- "unix socket" --> daemon
+  cli -- "unix socket" --> daemon
+  daemon -- "events, claims, shards<br/>WebSocket /ws" --> relay
+  relay -- "reads, appends" --> db
+  web -- "HTTPS /api, WebSocket" --> relay
+  relay -- "verifies tokens" --> supabase
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+  classDef db fill:#438dd5,stroke:#2e6295,color:#fff
+```
+
+| Container | Runs | Responsibility |
+|---|---|---|
+| **knoot hook** | A short-lived process per hook event | The only code that knows which agent is calling. Reads the payload on stdin, asks the daemon, answers in the agent's output format. Every failure path exits 0 with no output. |
+| **knootd** | `knoot daemon`, one per machine, socket at `~/.knoot/knootd.sock` | Holds a mirror of each repo's log, so the pre-write check is local (microseconds). Keeps the decrypted memory cache, composes each turn's brief, publishes session context, holds the MLS group state. |
+| **knoot CLI** | The same binary, on demand | Setup (`init`, `login`, `join`, `status`) and the human-facing views (`who`, `why`, `recall`, `watch`). |
+| **knoot relay** | `knoot relay`, one per team | One sequencer per repo: assigns every event a sequence number, arbitrates claims, fans events out. Stores sealed memory shards it may not be able to read. Serves the HTTP API and the embedded web app. |
+| **relay.db** | SQLite in WAL mode | The event log is the product: claims are a policy over it, messages travel through it, the audit trail *is* it. |
+| **Web app** | Vite multi-page build in `web/`, embedded with `include_dir!` | `/` site, `/docs`, `/status`, `/app` team console, `/ops` single-team operator view, `/lab` browser lab. One binary serves all of it — no second deployment, no CORS. |
+
+### One edit, end to end
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant H as knoot hook
+  participant D as knootd
+  participant R as relay
+  A->>H: PreToolUse (Edit src/auth.js)
+  H->>D: PreWrite {session, path, branch}
+  D->>D: check local mirror — held by a peer on this branch?
+  alt free locally
+    D->>R: ClaimReq
+    R->>R: sequence, arbitrate against the log
+    R-->>D: ClaimResp granted
+    D-->>H: allow (+ stale-read and memory notes)
+    H-->>A: additionalContext, or nothing
+  else held
+    D-->>H: deny — holder, intent, lease left
+    H-->>A: permissionDecision: deny + conflict brief
+    A->>A: re-plans on the brief
+  end
+```
+
+End to end — process spawn, socket, relay round trip — this is single-digit
+milliseconds.
+
+### What crosses the wire
+
+Exhaustively, every field on every event and message in `src/proto.rs`:
+
+| leaves the machine | never leaves |
+|---|---|
+| repo-relative **paths** of files claimed, written, read-and-gone, created or removed | file **contents**, in any form |
+| the **repo id** (derived from the `origin` URL) and the **branch** name | diffs, patch hunks, `Write` bodies |
+| **session ids**, and the **person** behind them (from the device key) | shell **commands** — parsed locally; only the paths they touch are sent |
+| an **intent**: the first 160 characters of each prompt | tool **output** — never read |
+| **messages** sent with `knoot msg`, in your own words | the **transcript** — never opened |
+| **facts, plans and cache entries** somebody chose to publish — sealed on your machine | what a session *read* — kept in the daemon |
+| a SHA-256 of each file a fact names, inside the sealed shard | which lines changed, or how many |
+
+The **intent** is the one field that carries what a person typed: paste a stack
+trace into the first line of a prompt and its first 160 characters reach peers.
+It is capped for that reason. `the_transcript_and_tool_response_are_never_read`
+in `tests/codex.rs` asserts the right-hand column against the bytes the relay
+actually stored.
+
+---
+
+## Level 3 — Components
+
+### Inside the binary on a developer machine
+
+```mermaid
+flowchart LR
+  subgraph hookc["knoot hook"]
+    shim["<b>Hook shim</b><br/>hook.rs<br/>agent detection, payload → DReq,<br/>outbox and spool flush"]:::component
+    bash["<b>Shell parser</b><br/>bashparse.rs<br/>writes and reads in a command"]:::component
+    patch["<b>Patch reader</b><br/>patch.rs<br/>paths in an apply_patch"]:::component
+  end
+
+  subgraph clic["knoot CLI"]
+    cmds["<b>Commands</b><br/>main.rs"]:::component
+    cfg["<b>Config</b><br/>config.rs<br/>.knoot.toml, areas, credentials"]:::component
+    watch["<b>Dashboard</b><br/>watch.rs"]:::component
+  end
+
+  subgraph daemonc["knootd"]
+    handler["<b>Request handler</b><br/>daemon.rs handle_req"]:::component
+    view["<b>Log mirror</b><br/>proto.rs View"]:::component
+    composer["<b>Brief composer</b><br/>daemon.rs"]:::component
+    mem["<b>Memory cache</b><br/>memory.rs Cache"]:::component
+    mlsc["<b>MLS client</b><br/>mls.rs"]:::component
+    link["<b>Relay link</b><br/>daemon.rs relay_loop"]:::component
+  end
+
+  relay["<b>knoot relay</b><br/>[Container]"]:::container
+
+  shim --> bash
+  shim --> patch
+  shim -- "DReq" --> handler
+  cmds -- "DReq" --> handler
+  cmds --> cfg
+  handler -- "check, apply" --> view
+  handler -- "build brief" --> composer
+  composer -- "facts for touched paths" --> mem
+  mem -- "seal, open" --> mlsc
+  link -- "apply events" --> view
+  link -- "WebSocket" --> relay
+  watch -- "read-only WebSocket" --> relay
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+  classDef db fill:#438dd5,stroke:#2e6295,color:#fff
+```
+
+| Component | Source | What it does |
+|---|---|---|
+| **Hook shim** | `src/hook.rs` | Claude Code and Codex send the same envelope and accept the same output contract; they differ in what an edit looks like (`Write`/`Edit`/`MultiEdit`/`NotebookEdit` vs one `apply_patch`). Agent is named on the installed command line, else inferred from the payload. Before anything else it flushes `.knoot/outbox/` and `.knoot/spool/`. |
+| **Shell parser** | `src/bashparse.rs` | Finds write targets — redirects, heredoc targets, `tee`, `sed -i`, `cp`/`mv`, `rm`, `dd of=` — respecting quoting and skipping heredoc bodies. Also extracts reads (`cat`, `sed -n`, `grep`), because Codex has no read tool. Says when a command could not be proven read-only. |
+| **Patch reader** | `src/patch.rs` | Returns the paths and the kind of each operation in an `apply_patch`. Never the hunks. |
+| **Request handler** | `src/daemon.rs` | One `DReq` in, one `DResp` out. A patch is checked as a unit: every path is tested before any is claimed. Deletions are announced only once the path is really gone. Unknown repos and every error answer *allow*. |
+| **Log mirror** | `src/proto.rs` `View` | The deterministic state machine both daemon and relay replay the log into. Answers *who holds this*, *is it a hub*, *what was written since*, *who is waiting*. |
+| **Memory cache** | `src/memory.rs` | Decrypted shards for the areas this member is in. Relevance by path, staleness by file hash, supersession by name. |
+| **Brief composer** | `src/daemon.rs` | Turns state into the text an agent sees: peers and their plans, mail, files that moved under the session, facts about the files it touches, cached answers, hub queues. On a denial the same brief rides the refusal. |
+| **Relay link** | `src/daemon.rs` | Keeps the WebSocket to the relay, backs off and reconnects, applies the event stream to the mirror. A rejected token turns coordination off with one stderr line; it never blocks a write. |
+| **MLS client** | `src/mls.rs` | Under the `mls` provider: one leaf per device in each room's group; the shard key is exported from the group and sent nowhere. |
+| **Config** | `src/config.rs` | `.knoot.toml` (committed: relay, repo id, hubs, areas), `~/.knoot/credentials.toml` (0600, keyed by relay origin), CODEOWNERS → areas. |
+| **Dashboard** | `src/watch.rs` | `knoot watch`: a read-only client that mirrors the log and redraws. |
+
+### Inside the relay
+
+```mermaid
+flowchart LR
+  daemon["<b>knootd</b><br/>[Container]"]:::container
+  console["<b>Web app</b><br/>[Container]"]:::container
+
+  subgraph relayc["knoot relay"]
+    ws["<b>Sequencer and arbiter</b><br/>relay.rs ws_handler, client<br/>sequence numbers; View::conflicting_on"]:::component
+    api["<b>HTTP API</b><br/>relay.rs routes<br/>events, memory, team, keys, rooms"]:::component
+    store["<b>Memory store</b><br/>memory.rs<br/>sealed shards, retention"]:::component
+    ds["<b>MLS delivery service</b><br/>relay.rs, mls_log"]:::component
+    teams["<b>Teams and devices</b><br/>teams.rs, rooms.rs"]:::component
+    cloud["<b>People's identity</b><br/>cloud.rs"]:::component
+    static["<b>Static site</b><br/>embedded web/dist"]:::component
+    term["<b>Lab terminals</b><br/>term.rs, only with --lab-dir"]:::component
+  end
+
+  db[("<b>relay.db</b><br/>[SQLite]")]:::db
+  supabase["<b>Supabase</b><br/>[External system]"]:::external
+
+  daemon -- "WebSocket /ws" --> ws
+  console -- "HTTPS" --> api
+  console -- "HTTPS" --> static
+  console -- "WebSocket" --> term
+  ws -- "authorise connection" --> teams
+  ws -- "publish, sync shards" --> store
+  ws -- "MLS messages" --> ds
+  api --> teams
+  api -- "console sign-in" --> cloud
+  cloud --> supabase
+  ws -- "append events" --> db
+  store --> db
+  teams --> db
+  ds --> db
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+  classDef db fill:#438dd5,stroke:#2e6295,color:#fff
+```
+
+| Component | Source | What it does |
+|---|---|---|
+| **Sequencer and arbiter** | `src/relay.rs` | Every event on a repo gets the next sequence number and is appended before it is broadcast. A claim is decided against the same `View` the daemons run, so local pre-checks and the relay agree. Same branch and same area → deny; different branch → allow and record `CrossBranchOverlap`. 400+ concurrent races produce exactly one winner. |
+| **HTTP API** | `src/relay.rs` | Read-only data for the console (`/api/repos`, `/api/events`, `/api/memory`) and the team surface (`/api/register`, `/api/tokens`, `/api/members`, `/api/rooms`). Every repo key is namespaced by team id, so one team can never address another's log. |
+| **Memory store** | `src/memory.rs` | Stores ciphertext plus what it needs to route: scope, kind, author, epoch, a blinded name for uniqueness. Facts kept 90 days, cache 14, session context for the session. 64 KiB per shard, budget per scope. |
+| **MLS delivery service** | `src/relay.rs`, `mls_log` | Orders commits, welcomes and key packages for each room's group. Can read none of them. |
+| **Teams and devices** | `src/teams.rs`, `src/rooms.rs` | A key is a **device**, belonging to a **member**, who is in **rooms**; a room grants `(repo, area)` pairs. Keys are stored as SHA-256 hashes and resolved locally with no network call, so the hot path works when everything else is down. Registration is rate-limited per IP. |
+| **People's identity** | `src/cloud.rs` | Only when Supabase is configured. Exchanges a console session for a user and team. Handles both `sb_secret_…` keys and the legacy JWTs Supabase retires at the end of 2026. |
+| **Lab terminals** | `src/term.rs` | Real `claude` sessions in PTYs, bridged to xterm.js. Spawned only with `--lab-dir`, and gated by the relay's own secret — a terminal is a shell on the host. |
+
+### What the components do together
+
+**Shared memory.** Three kinds, one shape: every entry is scoped to an area,
+sealed on the machine that wrote it, and carries its author from the device key.
+
+| | what it is | written by | lives |
+|---|---|---|---|
+| **facts** | a durable statement: a convention, a decision, a gotcha | `knoot remember` | 90 days; superseded chains kept |
+| **repo_cache** | something derived: where a symbol lives, how tests run | `knoot cache` | 14 days; **dropped** when its files change |
+| **session_context** | what a session is doing now and what it has settled | the daemon every turn; `knoot plan` to say more | the session |
+
+A fact records a hash of each file it names. A later write to one marks it
+*⚠ possibly stale: priya changed src/billing.js since* — unless the file was
+written back byte for byte. Writing the same `--name` again supersedes rather
+than duplicates, so two agents contradicting each other produce one current
+answer and a record of what changed. Session context is composed by the daemon
+from the intent and claims a session already declared — never summarised from a
+transcript, marked as derived, and stood down the moment the session runs
+`knoot plan` itself.
+
+Publishing is **refused** when the text or its source file looks like a
+credential: anything `.gitignore`d, `.env*`, `*.pem`, `*.key`, `id_*`, a known
+token prefix, or a long key-shaped string. Nothing is ever derived from a
+transcript.
+
+**Awareness, pushed every turn.** The brief carries what peers are doing and
+have settled, facts and cached answers about the files this session touches,
+files it *read* that a peer has since written, creations and deletions that
+collide, a peer on the same task, hub queues, who is here and on which branch,
+and mail. When a holder releases a file, every session that was denied it is
+told — through the `Stop` hook, so the news arrives before the agent ends its
+turn.
+
+**Writes, gated.** Every write auto-claims its file on a 10-minute lease,
+renewed by activity and expired on crash, so nothing can wedge the repo. A
+widely-shared file (three sessions in half an hour, or listed under `hubs`) is
+queued on a 2-minute lease instead of owned. Shell writes the parser can read
+are gated like the Edit tool; what it cannot read — interpreters, build tools —
+is allowed, the tree is fingerprinted before and after, and an `UngatedWrite`
+landing on a peer's claim is told to **both** parties at their next hook.
+Writes that can be gated are gated; writes nobody could gate are never quiet.
+
+**People in the room.** `knoot present --doing "…"` watches the working tree
+through `git status` and registers what you touch through the same requests a
+hook uses. You appear in `knoot who` as a **person**, and agents are told not
+to wait on you or ask you to release a file — a person cannot be asked to move.
+
+**Codex's sandbox.** Codex runs the agent's own shell commands under a policy
+that refuses every socket, so `knoot msg`, `plan`, `remember` and `cache` detect
+a refused connect, queue the request under `.knoot/spool/`, and the next hook —
+which runs outside the sandbox — sends it. Messages can also be written to
+`.knoot/outbox/<user>` with the edit tool. Codex's brief says so; `init` adds
+`.knoot/` to `.gitignore`.
+
+---
+
+## Level 4 — Code
+
+The rules everything above relies on live in a handful of types.
+
+### The log: `proto::Event`
+
+Every state change is one of these, sequenced by the relay and replayed by
+everyone into the same `View`:
+
+`SessionStarted` · `IntentDeclared` · `ClaimAcquired` · `ClaimDenied` ·
+`ClaimReleased` · `PathFreed` · `FileWritten` · `PathRemoved` · `UngatedWrite` ·
+`CrossBranchOverlap` · `StaleRead` · `CreateCollision` · `DuplicateIntent` ·
+`Message` · `MemoryRefused` · `SessionEnded`
+
+**Agent turns are transactions, not commits.** Agents can be re-run cheaply, so
+a collision aborts and re-plans rather than merging. Mutual exclusion cannot be
+merged, only arbitrated — so there is one sequencer per repo, no CRDT and no
+consensus protocol.
+
+### The state machine: `proto::View`
+
+`View::apply(&Event)` is the only way state changes, so the daemon's mirror and
+the relay agree by construction and the log replays deterministically. The
+questions it answers:
+
+| Method | Answers |
+|---|---|
+| `conflicting_on(session, path, branch)` | who holds this path in a way that blocks this session |
+| `cross_branch_overlap` | who holds it on another branch — a merge conflict predicted early |
+| `is_hub` / `lease_for` / `queue_len` | whether a path is shared enough to queue, and for how long |
+| `written_by_other_since` | what moved under a session since it read it |
+| `waiters_for` | who to tell when a path is freed |
+
+### The wire: `ClientMsg` / `ServerMsg`, `DReq` / `DResp`
+
+- **Daemon ↔ relay** (`ClientMsg`, `ServerMsg`, JSON over WebSocket): `Hello`,
+  `Append`, `ClaimReq`/`ClaimResp`, `ReleaseSession`, memory (`MemPublish`,
+  `MemSync`, `MemFetch`, `MemRewrap`, `MemForget`) and MLS
+  (`MlsKeyPackage`, `MlsCommit`, `MlsSync`, `MlsRoster`, `Welcome`).
+- **Hook/CLI ↔ daemon** (`DReq`, `DResp`, JSON over the unix socket):
+  `PreWrite`, `PostWrite`, `PreWriteBatch`, `PostWriteBatch`, `FileRead`,
+  `BashPre`, `BashPost`, `SessionStart`, `Intent`, `StopCheck`, `SessionEnd`,
+  and the CLI's `Who`, `Msg`, `Poll`, `Remember`, `Plan`, `Cache`, `Recall`,
+  `Health`. Answers are `Decision`, `Mail`, `Memory`, `Health`, `Err`.
+
+### Memory: `memory::Shard`, `KeyProvider`, `Refusal`
+
+A `Shard` is ciphertext under AEAD with AAD = `id ‖ scope ‖ kind ‖ author ‖
+email ‖ epoch`, so a relay that swaps two shards' metadata produces a
+decryption failure, not a silent lie. `KeyProvider` has two implementations:
+`Plaintext` (an integrity tag only, for a relay inside your own network) and
+the MLS provider (`KNOOT_KEY_PROVIDER=mls` on the relay), where each room is an
+RFC 9420 group and removing someone moves the room to an epoch their laptop
+cannot derive. `refuse_path` and `refuse_text` return a `Refusal` before
+anything is sealed.
+
+### Constants worth knowing (`src/proto.rs`, `src/memory.rs`)
+
+| Constant | Value | Why |
+|---|---|---|
+| `LEASE_MS` | 10 min | renewed on activity; a crashed session releases on its own |
+| `HUB_LEASE_MS` | 2 min | renewed by *writing*, so a thinking session gives a shared file up |
+| `HUB_WINDOW_MS`, `HUB_SESSIONS` | 30 min, 3 | three sessions in one file in half an hour is a shared dependency |
+| `WRITE_WINDOW_MS` | 30 min | how long "changed under you" stays worth saying |
+| `SESSION_STALE_MS` | 12 h | an idle session at its prompt is alive |
+| `FACTS_RETAIN_DAYS`, `REPO_CACHE_RETAIN_DAYS` | 90, 14 | |
+| `MAX_SHARD_BYTES` | 64 KiB | |
+
+### Stored tables (`relay.db`)
+
+`events` (repo, seq, ts, json) · `memory_shards` · `teams` · `members` ·
+`devices` · `tokens` · `rooms` · `room_members` · `room_areas` ·
+`mls_key_packages` · `mls_log`
+
+---
+
+## Deployment
+
+```mermaid
+flowchart LR
+  subgraph laptop["Developer laptop — macOS or Linux"]
+    d1["<b>knootd + hooks</b><br/>[knoot binary]"]:::container
+  end
+
+  subgraph host["Ubuntu host — 1 vCPU / 1 GB is enough"]
+    caddy["<b>Caddy</b><br/>TLS, automatic certificates<br/>443 → 127.0.0.1:7420"]:::external
+    subgraph systemd["systemd: knoot-relay.service"]
+      relay["<b>knoot relay</b><br/>[loopback only]"]:::container
+      db[("<b>relay.db</b><br/>SQLite WAL;<br/>nightly .backup, 7 kept")]:::db
+    end
+    ls["<b>Litestream</b><br/>continuous replication"]:::external
+  end
+
+  s3[("<b>Object storage</b><br/>S3-compatible log replica")]:::external
+  gh["<b>GitHub Releases</b><br/>Linux musl static,<br/>macOS arm64 and x86_64"]:::external
+
+  d1 -- "wss://" --> caddy
+  caddy -- "HTTP" --> relay
+  relay --> db
+  ls -- "reads WAL" --> db
+  ls -- "WAL frames" --> s3
+  host -. "provision.sh downloads,<br/>verifies checksum" .-> gh
+  laptop -. "install.sh" .-> gh
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+  classDef db fill:#438dd5,stroke:#2e6295,color:#fff
+```
+
+`deploy/` provisions this on a fresh Ubuntu host:
 
 ```sh
-scp -r deploy root@<droplet-ip>:/root/
-ssh root@<droplet-ip> 'DOMAIN=relay.example.com APEX=example.com bash /root/deploy/provision.sh'
+scp -r deploy root@<host>:/root/
+ssh root@<host> 'DOMAIN=relay.example.com APEX=example.com bash /root/deploy/provision.sh'
 ```
 
-Point `A` records for both names at the droplet first; Caddy gets the
-certificates itself on the first request. The script is idempotent — re-run it
-to deploy a new revision, and it keeps the existing token rather than rotating
-it out from under the team. It refuses to claim success without checking that
-the relay rejects an untokened request, accepts a tokened one, validates
-registration input, and has a replicable event log.
+Point `A` records for both names at the host first; Caddy gets certificates on
+the first request. The script is idempotent — re-run it to deploy a new
+revision — keeps the existing token rather than rotating it out from under the
+team, and refuses to claim success until it has checked that the relay rejects
+an untokened request, accepts a tokened one and has a replicable log. It
+downloads the binary CI built rather than compiling on a 1 GB box, verifies the
+checksum, and swaps it in only once everything around it is in place.
+`SOURCE=build` compiles on the box instead.
 
-**It downloads the binary rather than building it.** CI publishes a static
-musl build to the `nightly` release on every push to `main` — alongside macOS
-builds for Apple silicon and Intel, so a laptop need not compile; the provisioner
-verifies its checksum and swaps it in only once everything around it is in
-place, so a failed download leaves the running version untouched. A 1 vCPU /
-1 GB box needs a 2 GB swapfile to link this at all, and would be doing it
-while serving the relay it is about to replace. `SOURCE=build` still compiles
-on the box if you want that.
+**Not losing the log.** Two layers, because they fail differently: nightly
+`sqlite3 .backup` snapshots on the box (never `cp`, which half-copies a WAL
+database), and Litestream replication off it, which turns itself on once
+`/etc/knoot/litestream.env` exists and says loudly while it is off. The relay
+runs `journal_mode=WAL`; a test asserts it, because against a rollback journal
+Litestream copies nothing and reports success.
 
-Only `/` and `/app` and `/ops` are served without a token, and they are static
-shells: the event log, the repo list, the team API, and the websocket all check
-it. A browser cannot set a header, so the console takes `?token=` once and
-keeps it in `localStorage`.
+### Releases
 
-### Not losing the log
+CI (`.github/workflows/release.yml`) builds the web app, runs the test suite on
+Linux and builds all three binaries on every push to `main`, publishing them as
+the moving `nightly` pre-release. A `v*` tag matching `Cargo.toml`'s version
+publishes a versioned release, which is what `install.sh` takes by default.
 
-The event log is the product. Two layers, because they fail differently:
-
-- **Nightly snapshots, on the box.** A `sqlite3 .backup` — never `cp`, which
-  half-copies a WAL database into one that restores as corrupt — gzipped, 7
-  kept. This covers what actually happens: a bad `DELETE`, a corrupted page, a
-  mistake.
-- **Continuous replication, off the box,** via Litestream, which covers losing
-  the droplet: ten seconds of loss rather than a day. It needs object-storage
-  credentials, so it turns itself on only once `/etc/knoot/litestream.env`
-  exists and says so loudly while it is off — a backup that silently does
-  nothing is worse than one you know you do not have.
-
-Litestream reads the write-ahead log, so the relay sets `journal_mode=WAL`
-(with `synchronous=NORMAL`, which keeps a disk flush off the claim path). That
-is asserted by a test: against a rollback-journal database, replication copies
-nothing and reports success.
-
-## knoot.dev
-
-The hosted relay has a front end: [knoot.dev](https://knoot.dev) is the site,
-`/docs` the documentation, `/status` a live health check, and `/app` the team
-console. The console opens on one **Get started** flow until a repository has
-reached the relay — five steps, each ticked from what the relay actually knows:
-a live key, a connected repository, a second person — and then on the live
-log. Beside it: **Memory**, what the rooms know about a repository, who wrote
-each entry and whether it has gone stale; **History**, `knoot why` in a
-browser, one file's story in the CLI's own words; and the repositories, keys,
-rooms and team behind them. Every path in the log opens its history.
-
-```sh
-open https://knoot.dev/app/#signup      # email and password, for a person
-knoot init --relay wss://knoot.dev/ws
-knoot join <key> --relay wss://knoot.dev/ws   # a device key, for a machine
-```
-
-`join` stores the key and then asks the relay who it is for, printing the team,
-the member, the rooms and the areas it opens. `login` still exists and still
-works; it just believes the key without asking, which was honest when a key
-named only a team.
-
-**People and machines authenticate differently, on purpose.** A person signs in
-with email and password; that is a Supabase account, and it is what the console
-checks. A machine presents a device key minted in the console: resolved
-against local SQLite with no network call, because the hot path has to keep
-working when everything else is down. The CLI is unchanged and existing keys
-keep working.
-
-- **A key names a person, not just a team.** One row per machine per person, so
-  the relay can say who wrote something without taking the agent's word for it
-  — authorship on every event comes from the key, and `KNOOT_USER` can no
-  longer write an event as somebody else. Keys minted before this land in the
-  team's `general` room as "unassigned", still working, until an admin attaches
-  them to a person.
-- **A room is an access group over areas.** People, plus the `(repo, area)`
-  pairs they work in; a member's key grants the union of their rooms. Every
-  team gets one room called `general` over every repository, so a small team
-  never meets the word. `MULTIPLAYER.md` is the design this comes from.
-- **Device keys are stored as SHA-256 hashes.** A database dump hands over nothing
-  that works, and an existing key can never be shown to you again — only
-  replaced. Mint one per machine, so revoking one costs you nothing else.
-- **A team cannot address another team's log.** Every repo key is namespaced by
-  team id at the two places a repo is named, so two teams can both have a repo
-  called `api` and neither can read the other. `tests/teams_api.rs` asserts
-  that through the HTTP surface, not of a helper.
-- **A team is not an operator.** The lab's terminals are real shells on the
-  host, so they require the relay's own configured secret — not merely a valid
-  token.
-- **You cannot revoke your way out.** The last live device key is refused, and
-  so is removing the last person holding one, because there is no recovery path
-  and nobody to ask.
-
-The front end is a Vite app in `web/`, built to `web/dist` and embedded into
-the binary with `include_dir!`, so your own relay serves all of it with no
-second deployment and no CORS: `/` the site, `/docs`, `/status`, `/app` the
-console, `/ops` the original single-team operator view.
-
-```sh
-npm --prefix web ci
-npm --prefix web run build     # required before cargo build
-cargo build --release
-```
-
-`web/dist` is committed for exactly one reason: `cargo install --git` has no
-way to run npm, and a relay that cannot serve its own console is not one
-binary. CI rebuilds it on every push, so a stale `dist` cannot ship.
-
-Sign-in needs a Supabase project. Without one the relay still runs and agent
-tokens still work; the console simply says sign-in is not configured.
-
-```sh
-# the browser bundle, at build time. The publishable key is public by design.
-VITE_SUPABASE_URL=… VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_… \
-  npm --prefix web run build
-
-# the relay, at run time — it verifies a signed-in person's access token.
-# The secret key never goes near the browser.
-SUPABASE_URL=… SUPABASE_PUBLISHABLE_KEY=sb_publishable_… \
-  SUPABASE_SECRET_KEY=sb_secret_… knoot relay
-```
-
-These are Supabase's current API keys. The legacy `anon` and `service_role`
-JWTs still work and are still read under their old names
-(`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_ANON_KEY`),
-which matters because Supabase retires them at the end of 2026. The two formats
-are not interchangeable on the wire: a `sb_secret_…` key is not a JWT, so
-sending it as a bearer token is rejected as an invalid JWT. It goes in the
-`apikey` header alone, and `src/cloud.rs` has a test for each format.
-
-Apply the migrations in `supabase/migrations` in order. `0001_teams.sql`
-creates `teams` and `team_members` behind row-level security, so a browser
-holding the publishable key can read only its own team. `0002_invites.sql`
-adds `invites` and `accept_invite`, which is how a second person gets into an
-existing team — `create_team` refuses a second team per user, so without it a
-team is permanently a team of one. Invitations are stored as hashes too, are
-good for seven days, and only work for the address they were sent to.
+### Configuration
 
 Three places hold configuration, and the split is the security boundary:
 
 | Where | What goes there | Why |
 |---|---|---|
-| `web/.env` (gitignored) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Local development. Vite reads it at build time. |
-| GitHub Actions secrets | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | CI bakes them into the released binary's front end. |
-| `/etc/knoot/supabase.env` on the relay host, 0600 | all three, including `SUPABASE_SECRET_KEY` | The relay resolves team membership at run time. |
+| `web/.env` (gitignored) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Local development; Vite reads it at build time |
+| GitHub Actions secrets | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Baked into the released binary's front end |
+| `/etc/knoot/supabase.env` on the relay host, 0600 | the above plus `SUPABASE_SECRET_KEY` | The relay resolves team membership at run time |
 
-The secret key appears in exactly one of those. Anything named `VITE_*` is
-compiled into JavaScript that anyone can read, so a secret key must never be
-set there.
+| Variable | Read by | Effect |
+|---|---|---|
+| `KNOOT_RELAY_TOKEN` | relay | requires a bearer token on `/ws`, the data APIs and the lab |
+| `KNOOT_KEY_PROVIDER=mls` | relay | rooms become MLS groups; the relay cannot read memory |
+| `KNOOT_TOKEN` | daemon | overrides the stored credential, for CI and containers |
+| `KNOOT_BIN` | hooks | where the binary is, if not on `PATH` |
+| `KNOOT_USER` | CLI | local session name for mail; authorship always comes from the device key |
 
-The `dist/` committed to this repository is built by `npm run build:oss`, which
-points Vite at an empty env directory. That keeps one project's keys out of
-what `cargo install --git` serves; a self-hosted console simply reports that
-sign-in is not configured, and agent tokens work as usual.
+Without Supabase the relay still runs and device keys still work; the console
+says sign-in is not configured. Apply `supabase/migrations` in order when you
+do attach one.
 
-## Adding people
+---
 
-A team starts with one person, whoever registered it. On a relay attached to
-Supabase, the console invites the rest by email. On a self-hosted relay there is
-no sign-in to invite anybody to, so you create the person and hand them a key:
+## Operating a team
+
+### Enrolling a repository
 
 ```sh
-knoot member add priya@example.com --label "priya laptop"   # prints the key once
-knoot member ls                                             # who is here, and their machines
-knoot member rm priya@example.com                           # their keys stop; nobody else's change
+knoot init --relay wss://relay.example.com/ws     # once, by one person
+git add .knoot.toml .claude/settings.json .codex/hooks.json && git commit
 ```
 
-The key is shown once and is not recoverable — send it over something private,
-because it speaks as them until revoked. The console's Members tab does the
-same thing when the relay has no Supabase behind it.
+All three files are meant to be committed — `.knoot.toml` never carries a
+secret — so a clone is enrolled for whichever agent the person runs. Codex asks
+you to trust a repository's hooks once (`/hooks` inside Codex). Each teammate
+then needs the binary, `knoot daemon` running, and a device key.
 
-This matters more than it looks. A key names a *person*, and that is what
-authorship on the log, membership of a room, and the provenance on every
-memory shard are resolved from. A team where every key named the same human
-had rooms and areas that could not mean anything.
-
-## The browser lab
-
-Two live Claude Code sessions in the browser, with the knoot event log beside
-them — no tmux required.
+On a repo big enough that "everyone" is the wrong audience, divide it into
+**areas**, the unit of who can collide with whom. Declaring none means one
+area, `/`, holding the whole repo.
 
 ```sh
-./lab/lab.sh reset     # seed the repo once
-./lab/lab.sh web       # opens http://127.0.0.1:7420/lab
+knoot areas                                 # how this repo divides
+knoot areas --import-codeowners --write     # take the division from CODEOWNERS
 ```
 
-The relay hosts each agent as a real pty running `claude` with its own
-`KNOOT_USER`, bridged to xterm.js over a WebSocket. Output is buffered, so a
-page reload replays the session rather than showing a blank screen. Each
-terminal's header shows what that agent currently holds, and turns red the
-moment it is blocked. The log on the right is the same event stream the CLI
-dashboard reads.
+### People and keys
 
-Give both agents the same file to see a block:
-
-- **ash** — a long refactor of `src/auth.js` (holds the claim for minutes)
-- **priya** — ~30s later, anything touching `src/auth.js`
-
-Plain `knoot relay` spawns no processes; terminals exist only when it is
-started with `--lab-dir`:
+People and machines authenticate differently, on purpose. A person signs in to
+the console with email and password; a machine presents a **device key**
+minted for one person and one laptop, so revoking one costs nothing else.
 
 ```sh
-knoot relay --lab-dir /path/to/repo --agents ash,priya
+knoot join <key> --relay wss://knoot.dev/ws   # store a key and print who it names
+knoot member add priya@example.com --label "priya laptop"   # self-hosted: prints the key once
+knoot member ls
+knoot member rm priya@example.com             # their keys stop; nobody else's change
 ```
 
-## The tmux lab
+The last live key and the last person holding one cannot be removed — there is
+no recovery path and nobody to ask. A **room** is an access group over areas;
+every team starts with one called `general` over every repository, so a small
+team never meets the word.
+
+### Self-hosting with a token
 
 ```sh
+KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) knoot relay --listen 0.0.0.0:7420
+knoot login --relay wss://relay.example.com/ws --token <token>   # each teammate, once
+```
+
+Use `wss://` off-machine; terminate TLS at a proxy. **A relay that refuses you
+still fails open**: a rejected token turns coordination off with one stderr
+line, and every edit is allowed. An operator's mistake cannot become the
+team's outage.
+
+### knoot.dev
+
+The hosted relay. `/` is the site, `/docs` the documentation, `/status` a live
+health check, `/app` the console: a **Get started** flow ticked from what the
+relay actually knows, then the live log, **Memory** (what the rooms know, who
+wrote it, whether it is stale) and **History** (`knoot why` in a browser).
+
+---
+
+## Security model
+
+**The relay operator sees** teams, members, devices, rooms, areas and every
+event on the log — paths, intents, who, when — plus, for memory, shard counts,
+kinds, sizes, authors, epochs and which shards share a name. Under `mls`: no
+shard plaintext and no key. Under `plaintext`: everything, by design, on a box
+you run.
+
+**A room member sees** every shard in the areas they are in. There is no
+per-member read scoping inside an area; someone who should not read something
+belongs in a different area.
+
+**Defended:** device keys and invitations stored as hashes; one team cannot
+read, list or revoke another's anything (tested through the HTTP surface);
+authorship taken from the key, never from what a client says; credentials
+refused at publish time; transcripts and tool output never read.
+
+**Not claimed:** zero-knowledge — paths and intents *are* the product;
+protection against a member's own compromised machine; protection against a
+relay that withholds a shard, which it can do without reading it.
+
+Report a vulnerability privately through GitHub's security advisories on this
+repository rather than in a public issue.
+
+---
+
+## CLI reference
+
+| Command | Does |
+|---|---|
+| `knoot init [--relay URL] [--agent claude\|codex\|all]` | enrol this repo: `.knoot.toml` and hooks |
+| `knoot daemon` | run the per-machine daemon |
+| `knoot relay [--listen ADDR] [--db PATH]` | run a relay |
+| `knoot status` | is coordination actually on, and if not, why |
+| `knoot login --relay URL --token T` / `knoot join KEY` | store a credential for a relay |
+| `knoot who` | sessions, people, branches and claims on this repo |
+| `knoot watch` | live dashboard |
+| `knoot remember --name N [--path P]… TEXT` | publish a fact |
+| `knoot cache --name N --path P… TEXT` | publish derived knowledge, dropped when its files change |
+| `knoot plan [--path P]… [--decided D]… TEXT` | say what this session is doing and has settled |
+| `knoot recall [QUERY]` | what this repo's memory holds |
+| `knoot why PATH` | one file's history, from the log |
+| `knoot msg USER\|all TEXT` / `knoot inbox` | message a peer; read pending notes |
+| `knoot present [--doing TEXT]` | join the room as a person, from any editor |
+| `knoot areas [--import-codeowners] [--write]` | show or set how the repo divides |
+| `knoot member add\|ls\|rm` | people and device keys on a self-hosted relay |
+| `knoot hook [--agent A]` | the shim agents call; not for people |
+
+---
+
+## Development
+
+```sh
+npm --prefix web ci && npm --prefix web run build:oss   # the embedded front end
 cargo build --release
-./lab/lab.sh              # start (or re-attach)
-./lab/lab.sh reset        # wipe repo state + event log, then start
-./lab/lab.sh kill         # tear it all down
+cargo test                                              # 308 tests, ~20 s
 ```
 
-One tmux window: four Claude Code sessions in a 2x2 grid — `ash`, `priya`,
-`sam`, `ci-bot` — over a live dashboard.
-
-```
-┌── agent: ash ───────────────┬── agent: sam ───────────────┐
-│                             │                             │
-├── agent: priya ─────────────┼── agent: ci-bot ────────────┤
-│                             │                             │
-├── knoot watch ──────────────┴─────────────────────────────┤
-│ knoot ●  knootlab   4 session(s)  3 claim(s)  blocked 2   │
-│ USER      SESSION   INTENT                    HOLDS       │
-│ ash       a1b2c3d4  Refactor src/auth.js…     src/auth.js │
-│ priya     c9d0e1f2  Add refreshSession…       —           │
-│ ─────────────────────────────────────────────────────────  │
-│ 21:02:56  ash       claim   src/auth.js                    │
-│ 21:02:56  priya     BLOCKED src/auth.js (held by ash)      │
-└────────────────────────────────────────────────────────────┘
-```
-
-`TASKS.md` in the lab repo has four tasks to paste in — the first two collide on
-`src/auth.js` on purpose. Wants a terminal at least 150x40; `ctrl-b z` zooms a
-pane, `ctrl-b arrow` moves between them.
-
-`knoot watch` works in any repo, not just the lab.
-
-## Testing it with two sessions on one machine
-
-You don't need two OS users. Sessions are distinguished by Claude Code's own
-session id; `KNOOT_USER` just gives them readable names in conflict briefs.
-
-```sh
-# terminal 1
-KNOOT_USER=ash claude
-
-# terminal 2 (same repo)
-KNOOT_USER=priya claude
-```
-
-Give both an overlapping task ("refactor the auth module"). The second session
-to touch a file gets denied with the first session's identity and intent, and
-re-plans. Note `$USER` itself must not be overridden — Claude Code resolves its
-credentials through it.
-
-Inspect what happened afterwards:
-
-```sh
-sqlite3 ~/.knoot/relay.db \
-  "SELECT seq, datetime(ts/1000,'unixepoch','localtime'), json FROM events ORDER BY seq;"
-```
-
-## What four agents on one goal actually did
-
-`lab/GOAL.md` gives the lab a shared objective — ship an invoice endpoint, four
-owners, one codebase — because tasks with no common goal collide only by
-accident. Two runs, unprompted behaviour:
-
-- 18–28 messages per run: agents announced ownership, published export
-  contracts, corrected each other when messages crossed, and declared done.
-- A session asked to edit a file another held did not attempt it. Presence told
-  it who held the file, so it sent the holder a patch and offered to wait. The
-  collision was avoided *before* the block, which is the better outcome and the
-  reason that run recorded no denials at all.
-- The tree ended green: `node test.js`, 57–58 passing.
-
-## Tests
-
-```sh
-cargo test          # 308 tests, ~20s
-```
+`web/dist` is committed because `cargo install --git` cannot run npm and a
+relay that cannot serve its own console is not one binary. Rebuild it with
+`npm run build:oss` after any change under `web/` — that script points Vite at
+an empty env directory, so no project's keys end up in what this repository
+serves.
 
 | Layer | File | What it protects |
 |---|---|---|
-| Unit | `src/proto.rs`, `src/memory.rs` | path-overlap boundaries, lease expiry, log-replay determinism, staleness and supersession |
-| Memory | `tests/memory.rs` | a fact reaches a peer on the next turn unasked; scoped fetch by id; contradiction is a supersession; a `.env` is refused; a composed context never replaces a declared plan |
-| Encryption | `tests/mls.rs` | a relay dump yields no plaintext, no secret and no working credential; a removed device cannot derive the next epoch |
-| Awareness | `tests/awareness.rs`, `tests/areas.rs` | stale reads, creation collisions, deletions, hubs; one area's events never reach a session outside it |
-| Codex | `tests/codex.rs` | Codex's real payload shapes through the binary; a patch checked as a unit; shell reads count; the transcript and tool output never reach the relay; the brief names the outbox and a message left there is sent on the next hook |
-| Arbitration | `tests/arbitration.rs` | 400+ concurrent races → exactly one winner; conflict briefs carry holder + intent; repo isolation |
-| Failure | `tests/failure.rs` | fail-open on dead daemon, dead relay, unresponsive relay, malformed input; crash recovery via lease expiry |
-| Contract | `tests/e2e.rs` | real Claude Code hook payloads through the binary; exact deny/context JSON; latency ceiling |
-| Multi-tenancy | `tests/teams_api.rs`, `tests/memory.rs` | registration, token minting/revocation, and that one team cannot read, list, or revoke another's anything — including through the console's `/api/memory` |
-| Durability | `tests/failure.rs` | claims and sequence numbers survive a relay restart; the log stays replicable (WAL) |
+| Unit | `src/proto.rs`, `src/memory.rs` | path overlap, lease expiry, replay determinism, staleness, supersession |
+| Memory | `tests/memory.rs` | a fact reaches a peer next turn unasked; scoped fetch by id; `.env` refused; composed context never replaces a plan |
+| Encryption | `tests/mls.rs` | a relay dump yields no plaintext or working credential; a removed device cannot derive the next epoch |
+| Awareness | `tests/awareness.rs`, `tests/areas.rs` | stale reads, creation collisions, deletions, hubs; area isolation |
+| Codex | `tests/codex.rs` | real payload shapes; patch as a unit; shell reads; transcript never sent; outbox and spool |
+| Arbitration | `tests/arbitration.rs` | 400+ concurrent races → one winner; briefs carry holder and intent |
+| Failure | `tests/failure.rs` | fail-open on dead daemon, dead or slow relay, malformed input; durability across restart |
+| Contract | `tests/e2e.rs` | real Claude Code payloads through the binary; exact output JSON; latency ceiling |
+| Multi-tenancy | `tests/teams_api.rs` | one team cannot read, list or revoke another's anything |
 
-## Known gaps
+### The lab
 
-- **Attribution under concurrent writes is inferred.** The working tree is
-  shared, so a peer's edit lands inside our audit window too. Authorship comes
-  from their `FileWritten` event; if that has not arrived yet, an ungated write
-  can be attributed to the wrong session. Observed live before the fix.
-- **Interpreters are only detected, never blocked.** `python3 -c "open(...)"`
-  writes first and is recorded second.
-- **Inside Codex's sandbox, knoot's CLI cannot reach the daemon directly.**
-  Every socket is refused there. Hooks, which run outside the sandbox, carry
-  everything `knoot who` would print; `knoot msg`, `knoot plan` and `knoot
-  remember` notice the refused socket, queue the request under `.knoot/spool/`,
-  and the next hook sends it — a plan as the session of the turn that queued
-  it. A refusal is written beside the request as `*.refused.txt`. What does
-  not work from inside is anything that needs an answer now: `knoot who`,
-  `knoot recall`, `knoot why`, `knoot status`.
-- **Same-name sessions share a mailbox.** Mail is keyed by user, so two
-  sessions running as the same `KNOOT_USER` both receive its notes.
-- **Fail-open is ambiguous by design.** An allowed edit and an unreachable
-  daemon look identical from the agent's side. Tests use a positive control
-  (the relay must hold the claim) to tell them apart; humans should check
-  `knoot watch` shows a green dot.
+```sh
+./lab/demo.sh             # one command: build, seed, three agents in the browser lab
+./lab/lab.sh              # four Claude Code sessions in tmux over a live dashboard
+./lab/lab.sh reset        # wipe the lab repo and event log first
+```
 
-Not testable by the suite at all: whether the conflict brief persuades a model
-to re-plan. Live runs say yes so far — one session prepared its patch and
-waited rather than writing; another, seeing a peer mid-rename, wrote its
-function and flagged that the peer's rename would need to cover it. Neither
-attempted a shell bypass. Small N.
+The lab seeds a small repository with a shared goal and tasks that collide on
+purpose, so a claim, a denial and a re-plan can be watched as they happen. Two
+sessions on one machine also work: `KNOOT_USER=ash claude` in one terminal,
+`KNOOT_USER=priya claude` in another.
 
-## Where this is going
+---
 
-[REPORT.md](REPORT.md) says what is true of the code and every bug found by
-running real sessions. [GAPS.md](GAPS.md) says what would make it the best in
-its category, with each gap's evidence and what closed it. [DEMAND.md](DEMAND.md)
-asks whether anyone wants it, and answers honestly. [MULTIPLAYER.md](MULTIPLAYER.md)
-is the design of areas, rooms, memory and encryption, with its sources.
+## Known limitations
 
-Not planned, on purpose: fleet mode, merge queues, a model in the arbiter, or
-symbol-level claims until the log shows file-level is what bites.
+- **Interpreters are detected, never blocked.** `python3 -c "open(…)"` writes
+  first and is reported to both parties second. Knowing what a program writes
+  is knowing what it does.
+- **Ungated-write attribution is inferred** from a peer's `FileWritten` event;
+  if it has not arrived yet the write can be attributed to the wrong session.
+- **Inside Codex's sandbox, commands that need an answer now** — `who`,
+  `recall`, `why`, `status` — cannot reach the daemon. The brief already
+  carries what they would print; commands that publish are queued.
+- **Same-name sessions share a mailbox**, because mail is keyed by user.
+- **Fail-open is ambiguous by design**: an allowed edit and an unreachable
+  daemon look the same from the agent's side. `knoot status` tells them apart.
+- **Several agents on one laptop are one person**, because authorship comes
+  from the device key. The log still tells them apart by session.
+- **Other agents** — Cursor, Copilot — are not integrated yet. Each is a
+  matcher, a payload shape and a test file. A person in any editor can join
+  with `knoot present`.
+
+Deliberately not planned: fleet mode or merge queues (that is isolation, the
+thing knoot is the alternative to), a model in the arbiter (determinism and a
+replayable log are the product), and symbol-level claims until the log shows
+file-level is what bites.
+
+---
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this work, as defined in the Apache-2.0 license, shall be dual
+licensed as above, without any additional terms or conditions.
