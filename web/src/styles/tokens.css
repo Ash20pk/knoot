@@ -1,29 +1,35 @@
 /* knoot design tokens.
-   One system across the site, docs, console, status page and lab.
-   Colour carries state and nothing else: green holds, orange is blocked,
-   blue is a message between agents. */
+   One system across the site, docs, console, status page and lab: the Matrix.
+   Colour carries state and nothing else: green holds, red is blocked,
+   blue is a message between agents, amber is a warning. */
 
 :root {
-  --paper: #f1f2ef;
-  --paper-2: #e7e9e5;
-  --ink: #141719;
-  --ink-2: #5a6169;
-  --ink-3: #8a9097;
-  --rule: #c4c9c4;
+  /* The Matrix palette, mapped onto the names every page already uses. */
+  --paper: #000;
+  --paper-2: #031007;
+  --ink: #b9f6c7;
+  --ink-2: #7fcf93;
+  --ink-3: #4fa463;
+  --rule: #0f3a1a;
+  --rule-2: #1a5a2a;
 
-  --panel: #171c21;
-  --panel-2: #1d232a;
-  --panel-rule: #2b3238;
-  --panel-text: #e8ecef;
-  --panel-dim: #8b949d;
+  --panel: #031007;
+  --panel-2: #06180b;
+  --panel-rule: #0f3a1a;
+  --panel-text: #b9f6c7;
+  --panel-dim: #4fa463;
 
-  --held: #19a974;
-  --blocked: #ff4a1f;
-  --wire: #3b7bff;
-  --warn: #f0b429;
+  --bright: #e6ffe9;
+  --green: #00ff41;
+  --glow: 0 0 6px rgba(0, 255, 65, .55), 0 0 18px rgba(0, 255, 65, .25);
 
-  --sans: 'Instrument Sans', system-ui, -apple-system, sans-serif;
-  --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --held: #00ff41;
+  --blocked: #ff3b3b;
+  --wire: #3fa9ff;
+  --warn: #ffd23f;
+
+  --sans: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -36,16 +42,19 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 17px;
-  line-height: 1.5;
+  font-size: 15.5px;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-a:hover { text-decoration-color: var(--blocked); }
+a { color: var(--green); text-decoration: none; }
+a:hover { text-shadow: var(--glow); }
 code, kbd, pre { font-family: var(--mono); font-size: .92em; }
-:focus-visible { outline: 2px solid var(--wire); outline-offset: 3px; }
-h1, h2, h3, h4 { margin: 0; font-weight: 500; letter-spacing: -.02em; }
+:focus-visible { outline: 1px solid var(--green); outline-offset: 3px; }
+::selection { background: var(--green); color: #000; }
+h1, h2, h3, h4 { margin: 0; color: var(--bright); font-weight: 700; letter-spacing: -.03em; }
+b, strong { color: var(--bright); font-weight: 500; }
+code { color: var(--green); }
 p { margin: 0; }
 
 .wrap { width: min(1200px, calc(100vw - 48px)); margin: 0 auto; }
@@ -55,33 +64,34 @@ p { margin: 0; }
 
 /* ---------- buttons ---------- */
 .btn {
-  font: 500 15px/1 var(--sans);
-  color: var(--paper); background: var(--ink); border: 1px solid var(--ink);
-  padding: 12px 18px; border-radius: 3px; cursor: pointer; text-decoration: none;
+  font: 700 14px/1 var(--sans);
+  color: #00140a; background: var(--green); border: 1px solid var(--green);
+  padding: 12px 18px; border-radius: 2px; box-shadow: var(--glow); cursor: pointer; text-decoration: none;
   display: inline-flex; align-items: center; gap: 8px;
   transition: background .12s ease;
 }
-.btn:hover { background: #000; }
+.btn:hover { background: var(--bright); border-color: var(--bright); }
 .btn:disabled { opacity: .55; cursor: default; }
-.btn.quiet { background: transparent; color: var(--ink); }
-.btn.quiet:hover { background: var(--paper-2); }
+.btn.quiet { background: transparent; color: var(--green); box-shadow: none; }
+.btn.quiet:hover { background: var(--panel-2); color: var(--bright); }
 .btn.sm { padding: 8px 12px; font-size: 14px; }
 
 /* ---------- nav shared by the light pages ---------- */
-.nav { position: sticky; top: 0; z-index: 20; background: var(--paper); border-bottom: 1px solid var(--rule); }
+.nav { position: sticky; top: 0; z-index: 20; background: rgba(0, 0, 0, .86); backdrop-filter: blur(6px); border-bottom: 1px solid var(--rule); }
 .nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
-.brand { font-weight: 600; font-size: 19px; letter-spacing: -.01em; text-decoration: none; }
+.brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; text-decoration: none; color: var(--bright); }
 .nav nav { display: flex; gap: 22px; margin-left: 12px; }
 .nav nav a { text-decoration: none; color: var(--ink-2); font-size: 15px; }
 .nav nav a:hover, .nav nav a[aria-current] { color: var(--ink); }
 .nav .right { margin-left: auto; display: flex; gap: 16px; align-items: center; }
 .nav .right a { text-decoration: none; color: var(--ink-2); font-size: 15px; }
-.nav .right a:hover { color: var(--ink); }
+.nav .right a:hover { color: var(--bright); }
+.nav .right a.btn, .nav .right a.btn:hover { color: #00140a; }
 
 /* ---------- terminal ---------- */
 .term {
   background: var(--panel); color: var(--panel-text);
-  border: 1px solid #0c0f12; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--rule-2, #1a5a2a); border-radius: 3px; overflow: hidden;
 }
 .term .bar {
   display: flex; align-items: center; gap: 12px;
@@ -118,10 +128,10 @@ p { margin: 0; }
 .field { display: block; margin-top: 18px; }
 .field span { display: block; font-size: 14px; color: var(--ink-2); margin-bottom: 7px; }
 .field input {
-  width: 100%; padding: 11px 13px; border: 1px solid var(--ink); background: #fff;
+  width: 100%; padding: 11px 13px; border: 1px solid var(--panel-rule); background: #000;
   border-radius: 3px; font: 16px var(--sans); color: var(--ink);
 }
-.field input:focus { outline: 2px solid var(--wire); outline-offset: 1px; border-color: var(--wire); }
+.field input:focus { outline: 1px solid var(--green); outline-offset: 1px; border-color: var(--green); }
 .err { color: var(--blocked); font-size: 15px; margin-top: 12px; }
 .ok { color: var(--held); font-size: 15px; margin-top: 12px; }
 
@@ -134,3 +144,9 @@ footer.site .relay { margin-left: auto; font-family: var(--mono); font-size: 13p
   .wrap { width: calc(100vw - 32px); }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Scanlines, as on the homepage. */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 100;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, .18) 2px 3px);
+}

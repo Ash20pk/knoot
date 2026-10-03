@@ -1,9 +1,9 @@
 :root {
-    --bg: #12161a; --panel: #171c21; --panel-2: #1d232a; --rule: #2b3238; --rule-2: #222830;
-    --text: #e8ecef; --text-2: #aab2ba; --dim: #7d868f;
-    --held: #19a974; --blocked: #ff4a1f; --wire: #3b7bff; --warn: #f0b429;
-    --sans: 'Instrument Sans', system-ui, sans-serif;
-    --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --bg: #000; --panel: #031007; --panel-2: #06180b; --rule: #0f3a1a; --rule-2: #0a2a14;
+    --text: #b9f6c7; --text-2: #7fcf93; --dim: #4fa463;
+    --held: #00ff41; --blocked: #ff3b3b; --wire: #3fa9ff; --warn: #ffd23f;
+    --sans: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -33,7 +33,7 @@
   .term::after { content: ''; position: absolute; inset: 0; pointer-events: none; border: 2px solid transparent; transition: border-color .25s; }
   .term.active::after { border-color: var(--wire); }
   .term.blocked::after { border-color: var(--blocked); animation: pulse 1s ease-in-out infinite; }
-  @keyframes pulse { 50% { border-color: rgba(255,74,31,.35); } }
+  @keyframes pulse { 50% { border-color: rgba(255,59,59,.35); } }
   .term-bar { flex: none; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--rule); }
   .who { font-family: var(--mono); font-size: 13px; }
   .tag { font-size: 12px; color: var(--dim); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 6px; }
@@ -57,8 +57,8 @@
   @keyframes rowin { from { background: var(--panel-2); } to { background: transparent; } }
   .k.claim { color: var(--held); } .k.blocked { color: var(--blocked); } .k.ungated, .k.merge, .k.stale, .k.create, .k.deleted { color: var(--warn); }
   .k.joined, .k.freed { color: var(--wire); } .k.wrote, .k.intent, .k.left, .k.released { color: var(--text-2); }
-  .ev.blocked { background: rgba(255,74,31,.06); }
-  .ev.ungated { background: rgba(240,180,41,.06); }
+  .ev.blocked { background: rgba(255,59,59,.06); }
+  .ev.ungated { background: rgba(255,210,63,.06); }
   .empty { padding: 22px 14px; color: var(--text-2); font-family: var(--sans); font-size: 13.5px; }
   .empty code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
   .hint { flex: none; padding: 10px 14px; border-top: 1px solid var(--rule); color: var(--dim); font-size: 12.5px; }

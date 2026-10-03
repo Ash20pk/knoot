@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>knoot — your agents share what they know</title>
-<meta name="description" content="knoot gives a team's coding agents a shared memory. A fact one agent worked out reaches the next on the turn it opens the same code, is flagged when a colleague changes the files it names, and a write that would collide is caught before git sees it. Claude Code and Codex, through their own hooks.">
+<title>knoot: multiplayer for AI coding agents</title>
+<meta name="description" content="knoot makes coding agents multiplayer. Every agent on a team sees what the others are doing, inherits what they have learned, and is stopped before two of them overwrite the same file. Claude Code and Codex, through their own hooks.">
 <meta name="theme-color" content="#000000">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/site-zwMv2uhA.js"></script>
+  <script type="module" crossorigin src="/assets/site-CuGbA7Y8.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-P2Xu9kJm.js">
   <link rel="modulepreload" crossorigin href="/assets/relay-BZTlOxNI.js">
-  <link rel="stylesheet" crossorigin href="/assets/site-Ddb_qlXX.css">
+  <link rel="stylesheet" crossorigin href="/assets/site-BMxzmgB5.css">
 </head>
 <body class="mx">
 
@@ -38,15 +38,16 @@
 <main id="main">
 
 <section class="mx-hero">
-  <canvas class="mx-rain" aria-hidden="true"></canvas>
+  <canvas class="mx-lattice" aria-hidden="true"></canvas>
   <div class="mx-wrap mx-hero-body">
-    <p class="mx-eyebrow" data-type="Wake up. Your agents are working alone."></p>
-    <h1>Your team's agents share what they know<span class="mx-dim"> — and are told when it stops being true.</span></h1>
+    <p class="mx-eyebrow" data-type="Every coding agent today is playing single-player."></p>
+    <h1>Multiplayer for AI agents<span class="mx-dim"> Your whole team's agents, in the same world.</span></h1>
     <p class="mx-lede">
-      A fact one agent worked out reaches the next on the turn it opens the same
-      code, without anyone running a command. When a colleague changes a file that
-      fact is about, it is flagged <em>possibly stale</em> and names who moved it.
-      And the rare write that would collide is caught before git ever sees it.
+      Right now each agent works alone. It cannot see who else is in the repo, what
+      they are doing, or what they have already figured out. knoot makes it
+      multiplayer: agents <em>see each other's moves</em>, carry what one learned to
+      the next, and when two reach for the same file one is told to take another
+      path, before git ever sees the clash.
     </p>
 
     <div class="mx-install">
@@ -71,19 +72,19 @@
       <p class="mx-label">01 / shared memory</p>
       <h2>One fact. Every agent. No command.</h2>
       <p>
-        Agents ignore what sits behind a command — in our lab runs, cheap models told
+        Agents ignore what sits behind a command, in our lab runs, cheap models told
         outright to run one never did. So knoot pushes. A fact is put on the brief of
         every agent that opens the code it names, on that agent's next turn.
       </p>
       <p>
-        We planted one sentence — <em>all money is integer cents</em> — on a repo
+        We planted one sentence, <em>all money is integer cents</em>, on a repo
         that computed tax in floats, and gave four agents a billing task that never
         mentioned it. Three of the four wrote integer cents.
       </p>
       <ul class="mx-list">
-        <li><b>facts</b> — conventions and decisions, kept 90 days, superseded by name</li>
-        <li><b>cache</b> — what was worked out, dropped the moment its files change</li>
-        <li><b>context</b> — what each session is doing now, composed for it every turn</li>
+        <li><b>facts</b>: conventions and decisions, kept 90 days, superseded by name</li>
+        <li><b>cache</b>: what was worked out, dropped the moment its files change</li>
+        <li><b>context</b>: what each session is doing now, composed for it every turn</li>
       </ul>
     </div>
     <div class="mx-term" role="img" aria-label="A fact published with knoot remember appears on another agent's brief, then is flagged possibly stale after a teammate edits the file">
@@ -96,7 +97,7 @@
 <span class="g">knoot · what the team knows here</span>
   [facts] money
     all money is integer cents; never floats
-    — ash, 2m ago, about src/billing.js
+    · ash, 2m ago, about src/billing.js
 
 <span class="d">── after sam rewrites src/billing.js ──</span>
   [facts] money
@@ -114,7 +115,7 @@
       <p>
         The same hook that carries memory sees every write. A file being written is
         claimed on a short lease. A second agent reaching for it is told who holds it,
-        what they are doing and how long is left — in its own context, so it re-plans
+        what they are doing and how long is left, in its own context, so it re-plans
         instead of overwriting.
       </p>
     </div>
@@ -123,7 +124,6 @@
       <figcaption>
         <span class="ws-title">the repository, as the relay sees it</span>
         <span class="field-status" aria-live="polite"></span>
-        <span class="field-backend">three.js</span>
       </figcaption>
       <div class="field-stage">
         <div class="field-labels" aria-hidden="true"></div>
@@ -154,7 +154,7 @@
   module
 
 <span class="d">● Edit(src/auth.js)</span>
-<span class="o">knoot: held by ash</span> <span class="d">— "refactor session
+<span class="o">knoot: held by ash</span> <span class="d">· "refactor session
   handling…" ~8m left.</span>
 
 <span class="d">I'll start on the token helper
@@ -185,7 +185,7 @@ instead and come back to auth.js.</span>
     </div>
     <dl class="mx-grid">
       <div><dt>what peers are doing</dt><dd>Their plans, declared or composed from their intent, with the files they hold and what they have settled.</dd></div>
-      <div><dt>what moved under you</dt><dd>A file this session read that a peer has since written — before the next write, not at merge.</dd></div>
+      <div><dt>what moved under you</dt><dd>A file this session read that a peer has since written, before the next write, not at merge.</dd></div>
       <div><dt>what the team knows</dt><dd>Facts about the files in play, each with its author and whether it has gone stale.</dd></div>
       <div><dt>what lands at merge</dt><dd>A peer on another branch in the same file is not blocked; the brief says the two meet at merge.</dd></div>
       <div><dt>who is a person</dt><dd><code>knoot present</code> puts a human in the room. Agents are told not to wait on a person, and to pick other work.</dd></div>
@@ -195,25 +195,49 @@ instead and come back to auth.js.</span>
 </section>
 
 <section class="mx-sec" id="how">
-  <div class="mx-wrap mx-split">
-    <div>
-      <p class="mx-label">04 / how it works</p>
-      <h2>One binary. Three roles.</h2>
+  <div class="mx-wrap">
+    <div class="mx-head">
+      <p class="mx-label">04 / how it works, in four zoom levels</p>
+      <h2>One binary. Three roles. Start wide, zoom in.</h2>
       <p>
         Agents fire hooks. The hook asks a daemon on the same machine, which answers
         from a local mirror of the log in microseconds. The relay sequences every
         event per repository, arbitrates claims and stores memory it may not be able
-        to read.
+        to read. This is the C4 model of that: context, containers, components, code.
       </p>
-      <p>
-        Paths, intents and the facts someone chose to publish cross the wire. File
-        contents, diffs, commands and transcripts never do — and under the MLS key
-        provider the relay cannot read memory at all.
-      </p>
-      <a class="mx-link" href="https://github.com/Ash20pk/knoot#level-2--containers">read the architecture →</a>
     </div>
-    <div class="mx-term mx-diagram" role="img" aria-label="Agents call knoot hook, which talks to knootd over a unix socket; knootd talks to the relay over a websocket; the relay keeps a SQLite log">
-      <div class="mx-bar"><span>topology</span><span class="mx-dim">one machine · one team</span></div>
+
+    <figure class="c4" id="c4">
+      <div class="c4-tabs" role="tablist" aria-label="C4 level">
+        <button class="c4-tab" role="tab" type="button" aria-selected="true"><span>1</span> Context</button>
+        <button class="c4-tab" role="tab" type="button" aria-selected="false"><span>2</span> Containers</button>
+        <button class="c4-tab" role="tab" type="button" aria-selected="false"><span>3</span> Components</button>
+        <button class="c4-tab" role="tab" type="button" aria-selected="false"><span>4</span> Code</button>
+        <button class="c4-tour" type="button" aria-label="Toggle the automatic tour"><span class="on">tour: on</span><span class="off">tour: off</span></button>
+      </div>
+      <div class="c4-stage" role="img" aria-label="An animated 3D diagram of knoot at the selected C4 level; the text below describes it">
+        <div class="c4-labels" aria-hidden="true"></div>
+      </div>
+      <figcaption class="c4-cap" aria-live="polite">
+        <p class="c4-title"></p>
+        <p class="c4-scope"></p>
+        <p class="c4-text"></p>
+        <p class="c4-tip"></p>
+      </figcaption>
+      <div class="field-key" aria-hidden="true">
+        <span><i class="k-person"></i>person</span>
+        <span><i class="k-system"></i>system</span>
+        <span><i class="k-container"></i>container</span>
+        <span><i class="k-component"></i>component</span>
+        <span><i class="k-external"></i>external</span>
+        <span><i class="held"></i>request</span>
+        <span><i class="wire"></i>reply · brief · refusal</span>
+      </div>
+    </figure>
+
+    <div class="mx-split c4-fallback" id="c4-fallback" hidden>
+      <div class="mx-term mx-diagram" role="img" aria-label="Agents call knoot hook, which talks to knootd over a unix socket; knootd talks to the relay over a websocket; the relay keeps a SQLite log">
+        <div class="mx-bar"><span>topology</span><span class="mx-dim">one machine · one team</span></div>
 <pre>┌─ your machine ─────────────────────────────┐
 │ claude code ┐                              │
 │ codex       ├─&gt; <span class="g">knoot hook</span> ─unix─&gt; <span class="g">knootd</span>  │
@@ -224,6 +248,16 @@ instead and come back to auth.js.</span>
 │ <span class="g">sequencer</span> · <span class="g">arbiter</span> · <span class="g">memory</span>               │
 │ sqlite log · knoot.dev or your own box     │
 └────────────────────────────────────────────┘</pre>
+      </div>
+    </div>
+
+    <div class="c4-after">
+      <p>
+        Paths, intents and the facts someone chose to publish cross the wire. File
+        contents, diffs, commands and transcripts never do, and under the MLS key
+        provider the relay cannot read memory at all.
+      </p>
+      <a class="mx-link" href="https://github.com/Ash20pk/knoot#level-2--containers">read the architecture →</a>
     </div>
   </div>
 </section>
@@ -235,7 +269,7 @@ instead and come back to auth.js.</span>
       <h2>If knoot breaks, your agents do not know.</h2>
     </div>
     <dl class="mx-grid">
-      <div><dt>fails open, everywhere</dt><dd>Relay unreachable, daemon dead, token refused, memory unreadable — every path ends in an allowed write. Tests fail the build otherwise.</dd></div>
+      <div><dt>fails open, everywhere</dt><dd>Relay unreachable, daemon dead, token refused, memory unreadable, every path ends in an allowed write. Tests fail the build otherwise.</dd></div>
       <div><dt>code stays on your machine</dt><dd>Only paths, intent sentences and published facts leave it. Credentials are refused at publish time.</dd></div>
       <div><dt>keys name a person</dt><dd>Authorship comes from a device key, never from what a client claims. Keys are stored as hashes.</dd></div>
       <div><dt>teams are isolated</dt><dd>Two teams can both have a repo called <code>api</code>; neither can read the other's log.</dd></div>

@@ -21,7 +21,7 @@
 .check .verdict { font-size: 14.5px; }
 .check .verdict.up { color: var(--held); }
 .check .verdict.down { color: var(--blocked); }
-.check .verdict.part { color: #a8791a; }
+.check .verdict.part { color: #ffd23f; }
 .check .ms { font-family: var(--mono); font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 62px; text-align: right; }
 
 .note { margin-top: 64px; padding-top: 28px; border-top: 1px solid var(--rule); max-width: 68ch; }

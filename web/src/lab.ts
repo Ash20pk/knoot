@@ -33,12 +33,12 @@ const blockedFlash = new Map<string, number>();     // agent name -> until ts
 const panes: { term: any; send: (s: string) => void; fitNow: () => void }[] = [];
 
 const THEME = {
-  background: '#12161a', foreground: '#e8ecef', cursor: '#3b7bff',
-  black: '#12161a', red: '#ff4a1f', green: '#19a974', yellow: '#f0b429',
-  blue: '#3b7bff', magenta: '#b48eff', cyan: '#39c5cf', white: '#e8ecef',
-  brightBlack: '#7d868f', brightRed: '#ff7b5c', brightGreen: '#3fc98f',
-  brightYellow: '#f5c85c', brightBlue: '#6d9cff', brightMagenta: '#cbb0ff',
-  brightCyan: '#5ed5dd', brightWhite: '#ffffff',
+  background: '#000', foreground: '#b9f6c7', cursor: '#3fa9ff',
+  black: '#000', red: '#ff3b3b', green: '#00ff41', yellow: '#ffd23f',
+  blue: '#3fa9ff', magenta: '#b48eff', cyan: '#39c5cf', white: '#b9f6c7',
+  brightBlack: '#4fa463', brightRed: '#ff7b7b', brightGreen: '#6bff8f',
+  brightYellow: '#ffe27a', brightBlue: '#7cc0ff', brightMagenta: '#cbb0ff',
+  brightCyan: '#5ed5dd', brightWhite: '#e6ffe9',
 };
 
 function mountTerm(idx: number, name: string) {
@@ -52,7 +52,7 @@ function mountTerm(idx: number, name: string) {
   $('terms').appendChild(wrap);
 
   const term = new Terminal({
-    fontFamily: "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     fontSize: 12, lineHeight: 1.15, cursorBlink: true, scrollback: 6000,
     theme: THEME, allowProposedApi: true,
   });
@@ -109,7 +109,7 @@ const SCENARIO: { at: number; agent: number; note: string; line: string }[] = [
     line: cc('Invoice service, and be quick. FIRST: add an `Invoice` typedef comment to the SHARED file src/types.js as a single Edit. If that edit is refused because a teammate holds the file, tell me who holds it, then skip it. THEN write a small test.js with a node assert. One sentence to finish.'),
   },
   {
-    at: 3, agent: 2, note: 'sam → the endpoint in src/api.js, in parallel — no collision',
+    at: 3, agent: 2, note: 'sam → the endpoint in src/api.js, in parallel, no collision',
     line: cc('Invoice service, and be quick. In src/api.js wire POST /invoice: validate the session token, compute a total, return { total, currency }; 401 if unauthenticated. Edit src/api.js directly. One sentence to finish.'),
   },
 ];
@@ -144,7 +144,7 @@ async function boot() {
   agents = info.agents || [];
   if (!agents.length) {
     $('terms').innerHTML =
-      '<div class="empty">No terminals. Start the relay with <code>--lab-dir</code> — or run <code>./lab/demo.sh</code>.</div>';
+      '<div class="empty">No terminals. Start the relay with <code>--lab-dir</code>, or run <code>./lab/demo.sh</code>.</div>';
     ($('run') as HTMLButtonElement).disabled = true;
   } else {
     const box = $('terms');
@@ -164,7 +164,7 @@ async function boot() {
   repo = info.repo || (await fetch(withTok('/api/repos')).then((r) => r.json()).catch(() => []))[0] || null;
   $('repo').textContent = info.dir ? info.dir : (repo || '');
   if (repo) { await history(); connect(); }
-  else $('feed').innerHTML = '<div class="empty">No repo yet — start the relay with <code>--lab-dir</code>.</div>';
+  else $('feed').innerHTML = '<div class="empty">No repo yet. Start the relay with <code>--lab-dir</code>.</div>';
 }
 
 async function history() {
@@ -249,11 +249,11 @@ function feed(e: any, live: boolean) {
   const who = e.user || sessions.get(e.session)?.user || 'someone';
   let detail = '';
   if (e.type === 'intent_declared') detail = clip(e.text, 60);
-  else if (e.type === 'claim_denied') detail = `${base(e.path)} — held by ${e.holder_user}`;
-  else if (e.type === 'ungated_write') detail = `${base(e.path)} — over ${e.holder_user}`;
+  else if (e.type === 'claim_denied') detail = `${base(e.path)} · held by ${e.holder_user}`;
+  else if (e.type === 'ungated_write') detail = `${base(e.path)} · over ${e.holder_user}`;
   else if (e.type === 'message') detail = `${e.to || 'all'}: ${clip(e.text || '', 44)}`;
-  else if (e.type === 'stale_read') detail = `${base(e.path)} — ${e.peer_user} changed it`;
-  else if (e.type === 'create_collision') detail = `${base(e.path)} — also by ${e.peer_user}`;
+  else if (e.type === 'stale_read') detail = `${base(e.path)} · ${e.peer_user} changed it`;
+  else if (e.type === 'create_collision') detail = `${base(e.path)} · also by ${e.peer_user}`;
   else if (e.type === 'session_started' || e.type === 'session_ended') detail = '';
   else if (e.path) detail = e.path;
 

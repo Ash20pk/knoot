@@ -7,7 +7,7 @@
 <meta name="description" content="Install knoot, enrol a repository, wire up any agent, run your own relay, and read the hook protocol.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wdth,wght@0,75..100,400..700;1,75..100,400..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/src/styles/tokens.css">
 <link rel="stylesheet" href="/src/styles/docs.css">
 </head>
@@ -61,7 +61,7 @@
       <h2>Install</h2>
       <p>One binary provides the relay, the daemon, the hook shim and the CLI. Install it on every machine that runs agents.</p>
       <div class="cmd-row"><code>curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh</code><button class="copy" type="button">Copy</button></div>
-      <p>The installer takes the latest release — a static build for Linux x86_64, or macOS for Apple silicon and Intel — verifies its checksum and puts it in <code>~/.local/bin</code>. Set <code>KNOOT_VERSION=nightly</code> for the newest build of <code>main</code>, or <code>KNOOT_INSTALL</code> for another directory. On any other platform, build from source:</p>
+      <p>The installer takes the latest release, a static build for Linux x86_64, or macOS for Apple silicon and Intel, verifies its checksum and puts it in <code>~/.local/bin</code>. Set <code>KNOOT_VERSION=nightly</code> for the newest build of <code>main</code>, or <code>KNOOT_INSTALL</code> for another directory. On any other platform, build from source:</p>
       <div class="cmd-row"><code>cargo install --git https://github.com/Ash20pk/knoot</code><button class="copy" type="button">Copy</button></div>
       <div class="callout">
         <p>The hooks call <code>knoot</code> by name so they resolve on every machine that has it on <code>PATH</code>. If yours lives somewhere unusual, set <code>KNOOT_BIN</code>.</p>
@@ -106,7 +106,7 @@ coordination is on.</pre>
       <h3>Codex</h3>
       <p>The same <code>knoot init</code> also writes <code>.codex/hooks.json</code>. Codex asks you to trust a repository&rsquo;s hooks once: run <code>/hooks</code> inside Codex. Edits arrive as one <code>apply_patch</code> call, so a patch touching several files is checked as a unit and a denial on one file claims none of the others.</p>
       <div class="callout">
-        <p>Codex runs the agent&rsquo;s own shell commands in a sandbox that blocks every socket, so <code>knoot who</code> and <code>knoot msg</code> fail inside a Codex session with <em>Operation not permitted</em>. Hooks run outside that sandbox and keep working, and the brief Codex receives says so. <code>knoot msg</code>, <code>knoot plan</code> and <code>knoot remember</code> still work from inside: they notice the refused socket, queue the request under <code>.knoot/spool/</code>, and the next hook sends it. Codex can also message a peer by writing text to <code>.knoot/outbox/&lt;user&gt;</code>. <code>init</code> adds <code>.knoot/</code> to <code>.gitignore</code>. Commands that need an answer now &mdash; <code>who</code>, <code>recall</code>, <code>why</code>, <code>status</code> &mdash; do not work inside the sandbox; their content is already in the brief.</p>
+        <p>Codex runs the agent&rsquo;s own shell commands in a sandbox that blocks every socket, so <code>knoot who</code> and <code>knoot msg</code> fail inside a Codex session with <em>Operation not permitted</em>. Hooks run outside that sandbox and keep working, and the brief Codex receives says so. <code>knoot msg</code>, <code>knoot plan</code> and <code>knoot remember</code> still work from inside: they notice the refused socket, queue the request under <code>.knoot/spool/</code>, and the next hook sends it. Codex can also message a peer by writing text to <code>.knoot/outbox/&lt;user&gt;</code>. <code>init</code> adds <code>.knoot/</code> to <code>.gitignore</code>. Commands that need an answer now (<code>who</code>, <code>recall</code>, <code>why</code>, <code>status</code>) do not work inside the sandbox; their content is already in the brief.</p>
       </div>
 
       <h3>Any other agent</h3>
@@ -185,7 +185,7 @@ ash          main   <span class="d">"Refactor session handling to use short-live
       <p>The event log is the product, so it is protected in two layers that fail differently.</p>
       <ul>
         <li><strong>Nightly snapshots on the box.</strong> A <code>sqlite3 .backup</code>, never <code>cp</code>, which half-copies a write-ahead database into one that restores as corrupt. Gzipped, seven kept. This covers a bad delete or a corrupted page.</li>
-        <li><strong>Continuous replication off the box</strong> via Litestream, which covers losing the host: ten seconds of loss rather than a day. It needs object-storage credentials, so it turns itself on only once they exist and says so loudly while it is off.</li>
+        <li><strong>Continuous replication off the box</strong> which covers losing the host: ten seconds of loss rather than a day. It needs storage credentials, so it turns itself on only once they exist and says so loudly while it is off.</li>
       </ul>
     </section>
 
@@ -208,9 +208,9 @@ ash          main   <span class="d">"Refactor session handling to use short-live
       <div class="term">
         <div class="bar"><span class="cmd">SessionStart</span><span class="real">additionalContext, real output</span></div>
 <pre>knoot: 2 other active session(s) on this repo right now:
-- priya on branch main — <span class="d">"Add refreshSession() to the auth module"</span>
+- priya on branch main: <span class="d">"Add refreshSession() to the auth module"</span>
   [working in: src/tokens.js]
-- ash on branch main — <span class="d">"Refactor session handling to use short-lived tokens"</span>
+- ash on branch main: <span class="d">"Refactor session handling to use short-lived tokens"</span>
   [working in: src/auth.js]
 Avoid editing files they are working in; you will be blocked with
 details if you try, and told automatically when a file you were

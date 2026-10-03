@@ -90,7 +90,7 @@ function showAuth(): void {
   authEl.hidden = false;
   paintAuthMode();
   if (!configured) {
-    authMessage('err', 'Sign-in is not configured on this deployment. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY at build time, or run your own relay and use an agent token.');
+    authMessage('err', 'Sign-in is not configured on this deployment. Run your own relay and use an agent token, or use the hosted console at knoot.dev.');
     ($('#auth-go') as HTMLButtonElement).disabled = true;
   }
 }
@@ -683,13 +683,13 @@ function storyLine(e: RelayEvent & Record<string, unknown>, name: (s: string) =>
   const sess = e.session ?? '';
   const s = (k: string) => (typeof e[k] === 'string' ? (e[k] as string) : '');
   switch (e.type) {
-    case 'claim_acquired': return { cls: 'held', text: `${name(sess)} took it${e.intent ? ` — “${e.intent}”` : ''}` };
+    case 'claim_acquired': return { cls: 'held', text: `${name(sess)} took it${e.intent ? ` · “${e.intent}”` : ''}` };
     case 'claim_denied': return { cls: 'blocked', text: `${name(sess)} was blocked; ${e.holder_user ?? 'someone'} held it` };
     case 'claim_released': return { cls: 'plain', text: `${name(sess)} let it go` };
     case 'file_written': return { cls: 'plain', text: `${name(sess)} wrote it` };
     case 'path_removed': return { cls: 'warn', text: `${name(sess)} ${e.moved ? 'moved' : 'deleted'} it` };
     case 'ungated_write': return { cls: 'warn', text: `${name(sess)} wrote it while ${e.holder_user ?? 'someone'} held it (not stopped, only seen)` };
-    case 'cross_branch_overlap': return { cls: 'warn', text: `${name(sess)} touched it on ${e.branch ?? '?'}, ${e.peer_user ?? '?'} on ${s('peer_branch') || '?'} — these meet at merge` };
+    case 'cross_branch_overlap': return { cls: 'warn', text: `${name(sess)} touched it on ${e.branch ?? '?'}, ${e.peer_user ?? '?'} on ${s('peer_branch') || '?'}; these meet at merge` };
     case 'stale_read': return { cls: 'warn', text: `${name(sess)} was working from a stale read of it (${e.peer_user ?? 'someone'} had changed it)` };
     case 'create_collision': return { cls: 'blocked', text: `${name(sess)} and ${e.peer_user ?? 'someone'} both created it` };
     case 'path_freed': return { cls: 'wire', text: `freed by ${s('by_user') || 'someone'}` };
@@ -712,7 +712,7 @@ function storyHtml(path: string, events: RelayEvent[], about: MemoryItem[]): str
   }
   const story = lines.length
     ? `<div class="story">${lines.join('')}</div>`
-    : `<div class="empty">${events.length ? 'Only presence on the log — nobody has claimed or written it.' : 'Nothing on the log about this file yet.'}</div>`;
+    : `<div class="empty">${events.length ? 'Only presence on the log: nobody has claimed or written it.' : 'Nothing on the log about this file yet.'}</div>`;
   const known = about.length
     ? `<div class="panel-body"><div class="lbl">What the team knows about it</div><div class="facts">${about.map(factHtml).join('')}</div></div>`
     : '';
@@ -760,7 +760,7 @@ function viewTokens(): void {
       <div class="page-head">
         <div>
           <h1>Agent keys</h1>
-          <p>A key belongs to one machine and names one person. That is what lets the relay say who wrote something without taking the agent&rsquo;s word for it &mdash; and what lets one laptop be revoked without touching anybody else. Keys are stored as hashes and can never be shown again.</p>
+          <p>A key belongs to one machine and names one person. That is what lets the relay say who wrote something without taking the agent&rsquo;s word for it, and what lets one laptop be revoked without touching anybody else. Keys are stored as hashes and can never be shown again.</p>
         </div>
       </div>
 
@@ -795,7 +795,7 @@ function viewTokens(): void {
       ${orphans.length ? `<div class="panel">
         <div class="panel-head"><h2>Keys with no owner</h2></div>
         <div class="panel-body">
-          <p>These were minted before keys named a person, so they still work but nothing they write can be attributed. Attaching one to yourself does not change the key &mdash; the machine using it carries on &mdash; it only records whose it is.</p>
+          <p>These were minted before keys named a person, so they still work but nothing they write can be attributed. Attaching one to yourself does not change the key (the machine using it carries on); it only records whose it is.</p>
           <table class="rows" style="margin-top:14px">
             <tbody>${orphans.map((m) => `<tr>
               <td class="mono dim">${esc(m.email.replace('@unassigned.invalid', ''))}</td>
@@ -924,7 +924,7 @@ function viewRooms(): void {
           <p class="${r.areas.length ? 'mono' : 'dim'}">${r.areas.length
             ? r.areas.map((a) => `${esc(areaLabel(a))}${canAdmin
                 ? ` <button class="linkish" data-rm-area="${esc(r.id)}" data-repo="${esc(a.repo)}" data-area="${esc(a.area)}">remove</button>` : ''}`).join(' &middot; ')
-            : 'No areas yet &mdash; nobody in this room coordinates on anything.'}</p>
+            : 'No areas yet, nobody in this room coordinates on anything.'}</p>
           ${canAdmin ? `<div class="inline-form" style="margin-top:12px">
             <select data-area-repo="${esc(r.id)}">
               <option value="*">every repository</option>
@@ -1059,7 +1059,7 @@ async function viewTeam(): Promise<void> {
       ${canAdmin && configured ? `<div class="panel">
         <div class="panel-head"><h2>Invite a teammate</h2></div>
         <div class="panel-body">
-          <p>An invitation is to a person, not a link anyone can use: it only works for the address it was sent to, and it lapses after seven days. Nothing is emailed from here &mdash; send them the link yourself.</p>
+          <p>An invitation is to a person, not a link anyone can use: it only works for the address it was sent to, and it lapses after seven days. Nothing is emailed from here, send them the link yourself.</p>
           <div class="inline-form" style="margin-top:14px">
             <input id="inv-email" type="email" placeholder="their@email.com">
             <select id="inv-role">
@@ -1075,7 +1075,7 @@ async function viewTeam(): Promise<void> {
       ${canAdmin && !configured ? `<div class="panel">
         <div class="panel-head"><h2>Add a teammate</h2></div>
         <div class="panel-body">
-          <p>This relay has no sign-in behind it, so there is nobody to invite &mdash; you create the person and hand them a key. The key is shown once and cannot be read again; send it over something private.</p>
+          <p>This relay has no sign-in behind it, so there is nobody to invite, you create the person and hand them a key. The key is shown once and cannot be read again; send it over something private.</p>
           <div class="inline-form" style="margin-top:14px">
             <input id="add-email" type="email" placeholder="their@email.com">
             <input id="add-label" type="text" placeholder="their machine" value="first machine">
@@ -1155,7 +1155,7 @@ async function viewTeam(): Promise<void> {
              const rm = relayMemberFor(m.email);
              const keys = (relayTeam?.tokens ?? []).filter((t) => rm && t.member_id === rm.id && !t.revoked).length;
              return `<tr><td>${esc(m.email)}</td><td class="dim">${esc(m.role)}</td>
-               <td class="dim">${m.created_at ? esc(ago(Date.parse(m.created_at))) : '&mdash;'}</td>
+               <td class="dim">${m.created_at ? esc(ago(Date.parse(m.created_at))) : ','}</td>
                <td class="dim">${keys}</td>
                <td class="right">${canAdmin && m.role !== 'owner'
                  ? `<button class="btn danger sm" data-remove="${esc(m.user_id)}" data-email="${esc(m.email)}" data-member="${esc(rm?.id ?? '')}">Remove</button>`

@@ -83,9 +83,6 @@ export async function mountField(host: HTMLElement): Promise<void> {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   host.querySelector('.field-stage')!.appendChild(canvas);
 
-  const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'WebGPU' : 'WebGL2';
-  const note = host.querySelector<HTMLElement>('.field-backend');
-  if (note) note.textContent = `three.js on ${backend}`;
 
   const scene = new Scene();
   const cam = new OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
@@ -245,7 +242,7 @@ export async function mountField(host: HTMLElement): Promise<void> {
       if (t >= T.priyaDenied) {
         const pulse = 0.5 + 0.5 * Math.sin((t - T.priyaDenied) * 12);
         slabColor[idx('src/auth.js')].lerpColors(new Color(HELD), new Color(BLOCKED), fade * (0.6 + 0.4 * pulse));
-        say('priya denied src/auth.js — held by ash, "refactor session handling…", ~8m left');
+        say('priya denied src/auth.js · held by ash, "refactor session handling…", ~8m left');
       } else say('priya reaches for src/auth.js');
     }
     // priya takes tokens.js instead.
@@ -268,7 +265,7 @@ export async function mountField(host: HTMLElement): Promise<void> {
     }
     if (t >= T.release) {
       set('src/tokens.js', HELD, 0.22);
-      say('ash released src/auth.js, src/session.js — priya and sam are told');
+      say('ash released src/auth.js, src/session.js · priya and sam are told');
     }
     if (t < T.claimAuth) say('three sessions, one repository');
 

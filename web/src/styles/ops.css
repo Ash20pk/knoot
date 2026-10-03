@@ -1,9 +1,9 @@
 :root {
-    --bg: #12161a; --panel: #171c21; --panel-2: #1d232a; --rule: #2b3238; --rule-2: #222830;
-    --text: #e8ecef; --text-2: #aab2ba; --dim: #7d868f;
-    --held: #19a974; --blocked: #ff4a1f; --wire: #3b7bff; --warn: #f0b429;
-    --sans: 'Instrument Sans', system-ui, sans-serif;
-    --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --bg: #000; --panel: #031007; --panel-2: #06180b; --rule: #0f3a1a; --rule-2: #0a2a14;
+    --text: #b9f6c7; --text-2: #7fcf93; --dim: #4fa463;
+    --held: #00ff41; --blocked: #ff3b3b; --wire: #3fa9ff; --warn: #ffd23f;
+    --sans: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -50,8 +50,8 @@
   @keyframes rowin { from { background: var(--panel-2); } to { background: transparent; } }
   .k.claim { color: var(--held); } .k.blocked { color: var(--blocked); } .k.ungated, .k.merge { color: var(--warn); }
   .k.joined, .k.freed { color: var(--wire); } .k.wrote, .k.intent, .k.left, .k.released { color: var(--text-2); }
-  .ev.blocked { background: rgba(255,74,31,.06); }
-  .ev.ungated { background: rgba(240,180,41,.06); }
+  .ev.blocked { background: rgba(255,59,59,.06); }
+  .ev.ungated { background: rgba(255,210,63,.06); }
   .empty { padding: 30px 20px; color: var(--text-2); font-size: 14.5px; max-width: 52ch; line-height: 1.6; }
   .empty code { color: var(--text); }
   footer { padding: 10px 20px; color: var(--dim); font-size: 13px; border-top: 1px solid var(--rule); font-family: var(--mono); }
