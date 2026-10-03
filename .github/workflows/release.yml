@@ -14,7 +14,9 @@ name: release
 on:
   push:
     branches: [main]
+    # Path filters are not evaluated for tags, so a `v*` tag always builds.
     paths-ignore: ['**.md']
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -134,10 +136,12 @@ jobs:
             ${{ matrix.artifact }}.sha256
           if-no-files-found: error
 
-  # A single moving tag the provisioner can always point at, plus the commit
-  # it was built from so a deploy is traceable to a revision. One job, after
-  # every platform, so the tag never carries a Linux binary from one commit
-  # and a macOS binary from another.
+  # A push to main moves `nightly`, a single tag the provisioner can always
+  # point at, plus the commit it was built from so a deploy is traceable to a
+  # revision. A `v*` tag cuts a versioned release instead and leaves nightly
+  # alone; that is what `install.sh` and anyone pinning a version takes. One
+  # job, after every platform, so a release never carries a Linux binary from
+  # one commit and a macOS binary from another.
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -153,6 +157,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l out
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # The tag must match the crate, or `knoot --version` lies about
+            # which release it came from.
+            version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+            [ "$GITHUB_REF_NAME" = "v$version" ] \
+              || { echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version"; exit 1; }
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "knoot $GITHUB_REF_NAME" \
+              --generate-notes \
+              out/*
+            exit 0
+          fi
           gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
           gh release create nightly \
             --prerelease \

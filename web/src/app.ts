@@ -336,8 +336,8 @@ function viewStart(): void {
               <div class="n">1</div>
               <div class="body">
                 <h3>Install knoot on the machine where agents run</h3>
-                <p>One binary. It is the hook, the daemon and the CLI. Prebuilt Linux and macOS builds are on the <a href="https://github.com/Ash20pk/knoot/releases/tag/nightly">nightly release</a> if you would rather not compile.</p>
-                ${cmd('cargo install --git https://github.com/Ash20pk/knoot')}
+                <p>One binary. It is the hook, the daemon and the CLI. The installer takes the latest <a href="https://github.com/Ash20pk/knoot/releases">release</a> for Linux x86_64 or macOS and checks its checksum; elsewhere, build it with <code>cargo install --git https://github.com/Ash20pk/knoot</code>.</p>
+                ${cmd('curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh')}
               </div>
             </li>
             <li class="${cls(2, p.keys > 0)}" id="step-key">

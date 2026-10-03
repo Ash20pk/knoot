@@ -63,8 +63,9 @@
     <section id="install">
       <h2>Install</h2>
       <p>One binary provides the relay, the daemon, the hook shim and the CLI. Install it on every machine that runs agents.</p>
+      <div class="cmd-row"><code>curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh</code><button class="copy" type="button">Copy</button></div>
+      <p>The installer takes the latest release — a static build for Linux x86_64, or macOS for Apple silicon and Intel — verifies its checksum and puts it in <code>~/.local/bin</code>. Set <code>KNOOT_VERSION=nightly</code> for the newest build of <code>main</code>, or <code>KNOOT_INSTALL</code> for another directory. On any other platform, build from source:</p>
       <div class="cmd-row"><code>cargo install --git https://github.com/Ash20pk/knoot</code><button class="copy" type="button">Copy</button></div>
-      <p>Prebuilt binaries are attached to the <code>nightly</code> release on GitHub: a static build for Linux x86_64, and macOS builds for Apple silicon and Intel. Put one on your <code>PATH</code> as <code>knoot</code>, or build from source with the command above.</p>
       <div class="callout">
         <p>The hooks call <code>knoot</code> by name so they resolve on every machine that has it on <code>PATH</code>. If yours lives somewhere unusual, set <code>KNOOT_BIN</code>.</p>
       </div>
