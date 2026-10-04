@@ -41,6 +41,7 @@
     <a href="#messaging">Messages and notifications</a>
     <h4>Run it</h4>
     <a href="#hosted">The hosted relay</a>
+    <a href="#encryption">Encryption</a>
     <a href="#selfhost">Your own relay</a>
     <a href="#backups">Backups</a>
     <h4>Reference</h4>
@@ -72,8 +73,8 @@
       <h2>Enrol a repository</h2>
       <p>Run this once per repository. It writes <code>.knoot.toml</code> and the hook configuration, both of which are meant to be committed, so anyone who clones the repository is enrolled with no setup.</p>
       <div class="cmd-row"><code id="c-init">knoot init --relay wss://knoot.dev/ws</code><button class="copy" type="button">Copy</button></div>
-      <p>Then, once per machine, store the agent token and run the daemon.</p>
-      <div class="cmd-row"><code id="c-login">knoot login --relay wss://knoot.dev/ws --token &lt;token&gt;</code><button class="copy" type="button">Copy</button></div>
+      <p>Then, once per machine, store the device key the console gave you and run the daemon. Each key belongs to one person on one machine, so revoking it costs nothing else.</p>
+      <div class="cmd-row"><code id="c-login">knoot join &lt;key&gt; --relay wss://knoot.dev/ws</code><button class="copy" type="button">Copy</button></div>
       <div class="cmd-row"><code>knoot daemon</code><button class="copy" type="button">Copy</button></div>
       <div class="callout warn">
         <p>Tokens deliberately do not live in <code>.knoot.toml</code>. That file is committed, and a secret must never ride along with it. Credentials go to <code>~/.knoot/credentials.toml</code> at mode 0600, or the <code>KNOOT_TOKEN</code> environment variable for CI.</p>
@@ -132,7 +133,8 @@ coordination is on.</pre>
         <thead><tr><th>Command</th><th>What it does</th></tr></thead>
         <tbody>
           <tr><td><code>knoot init</code></td><td>Enrol the current repository. Writes <code>.knoot.toml</code> and hook config.</td></tr>
-          <tr><td><code>knoot login</code></td><td>Store an agent token for a relay, in <code>~/.knoot/credentials.toml</code>.</td></tr>
+          <tr><td><code>knoot join</code></td><td>Store this machine's device key for a relay, in <code>~/.knoot/credentials.toml</code>, and print who it names.</td></tr>
+          <tr><td><code>knoot login</code></td><td>Store a relay's shared token instead, for a self-hosted relay run on one secret.</td></tr>
           <tr><td><code>knoot daemon</code></td><td>Run the local claim mirror. One per machine.</td></tr>
           <tr><td><code>knoot relay</code></td><td>Run a relay: sequenced log, claims, arbitration.</td></tr>
           <tr><td><code>knoot status</code></td><td>Check binary, repository, hooks, daemon, relay and token.</td></tr>
@@ -165,15 +167,37 @@ ash          main   <span class="d">"Refactor session handling to use short-live
 
     <section id="hosted">
       <h2>The hosted relay</h2>
-      <p>Sign in to the console, create a team, and mint one agent token per machine. Tokens are stored as hashes, so an existing one can never be shown again, only replaced.</p>
-      <p>The console shows the live event log for every repository your team has connected, which is also the fastest way to confirm coordination is really on.</p>
+      <p>Sign in to the console and create a team. Each person mints a device key per machine, and invites bring colleagues in under their own address. Keys are stored as hashes, so an existing one can never be shown again, only replaced.</p>
+      <p>The console shows the live event log for every repository your team has connected, which is also the fastest way to confirm coordination is really on. Its Memory view lists what your team has written down, by whom and when; on knoot.dev the text itself is sealed, see <a href="#encryption">Encryption</a>.</p>
+    </section>
+
+    <section id="encryption">
+      <h2>Encryption</h2>
+      <p>On knoot.dev, the facts your team publishes are sealed end to end with <strong>MLS</strong> (Messaging Layer Security, <a href="https://www.rfc-editor.org/rfc/rfc9420">RFC 9420</a>), the IETF standard for encrypting to a group of devices. A fact is encrypted on the laptop that writes it, with a key only your team's machines hold, and the relay stores and forwards ciphertext it cannot open. Neither the relay nor anyone operating it can read your memory, and neither can a copy of its database.</p>
+      <h3>What the relay can and cannot see</h3>
+      <ul>
+        <li><strong>Never sent at all:</strong> file contents, diffs, commands, transcripts. This holds with or without encryption.</li>
+        <li><strong>Sealed:</strong> the facts, plans and derived knowledge your agents publish to memory.</li>
+        <li><strong>Readable to the relay:</strong> file paths in claims and writes, the one-line intent of each session, who is connected, and messages between people. Coordinating agents is reading these, so they cannot be hidden from the thing that coordinates.</li>
+      </ul>
+      <h3>How a machine gets the key</h3>
+      <p>Each room — the access group over your repositories, <code>general</code> by default — is an MLS group, and each machine that has run <code>knoot join</code> is a member. The server never holds the group key, so it cannot hand it out: a new machine is admitted by a daemon that is already in the room, which happens on its own the next time a teammate's daemon is running. Until then the new machine coordinates normally and simply cannot read the room's memory yet.</p>
+      <p>Removing a person or a machine moves the key forward, so what is written afterwards is unreadable to it.</p>
+      <div class="callout warn">
+        <p>The same property that keeps the relay out has one cost: if every machine in a room lost its knoot state at once — <code>~/.knoot/mls</code> on every laptop — nobody would hold the key, and that room's memory could not be read again, backups of the relay included. A team that has anyone's laptop still enrolled never meets this.</p>
+      </div>
+      <h3>Checking it</h3>
+      <p><code>knoot status</code> on a machine prints the provider (<code>provider mls</code>), and the <a href="/status/">status page</a> shows whether the relay can read the memory it stores. A relay you run yourself is readable by default; set <code>KNOOT_KEY_PROVIDER=mls</code> on it to seal memory the same way.</p>
     </section>
 
     <section id="selfhost">
       <h2>Your own relay</h2>
-      <p>The relay is one command. Unauthenticated is right for <code>127.0.0.1</code> and wrong for anything else, so give it a shared secret and it requires one.</p>
-      <div class="cmd-row"><code>KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) knoot relay --listen 0.0.0.0:7420</code><button class="copy" type="button">Copy</button></div>
-      <p>Use <code>wss://</code> off-machine. A bearer token over plaintext is a token anyone on the path can take. Terminate TLS with a proxy in front of the relay.</p>
+      <p>The relay is one process and one SQLite file, and nothing about it is specific to knoot.dev. The quickest way is the container behind a proxy that handles TLS; <code>deploy/selfhost/</code> in the repository is a working setup with Caddy:</p>
+      <div class="cmd-row"><code>docker run -d -p 127.0.0.1:7420:7420 -v knoot:/data -e KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) ghcr.io/ash20pk/knoot:latest</code><button class="copy" type="button">Copy</button></div>
+      <p>Or the binary itself, anywhere:</p>
+      <div class="cmd-row"><code>KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) knoot relay --listen 127.0.0.1:7420</code><button class="copy" type="button">Copy</button></div>
+      <p>Without <code>KNOOT_RELAY_TOKEN</code> a relay starts open, which is right for <code>127.0.0.1</code> and wrong for anything else. Use <code>wss://</code> off-machine: a bearer token over plaintext is a token anyone on the path can take.</p>
+      <p>Register your team with a <code>POST</code> to <code>/api/register</code>, which returns the owner's key; <code>knoot join</code> it, then <code>knoot member add</code> each colleague, who gets a key of their own. Registration is open so anyone can start a team on a public relay — on your own, close it at the proxy once your team exists. Add <code>KNOOT_KEY_PROVIDER=mls</code> to seal memory end to end, as knoot.dev does.</p>
       <div class="callout">
         <p>A relay that refuses you still fails open. A rejected token means coordination is off, not that anyone is blocked: the daemon says so once on stderr, and every edit is allowed. An operator's mistake cannot become an outage for the team.</p>
       </div>

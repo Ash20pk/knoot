@@ -738,8 +738,8 @@ fn me(id: &crate::teams::Identity) -> serde_json::Value {
 
 /// Whether this relay is serving, for the status page and anything else that
 /// watches it. Unauthenticated, so it says nothing about teams, repos or who
-/// is connected: that the process answers, that its log answers, its version
-/// and how long it has been up. The log is asked a real question rather than
+/// is connected: that the process answers, that its log answers, its version,
+/// how long it has been up, and whether it can read the memory it stores. The log is asked a real question rather than
 /// assumed, because a relay whose database has gone away still answers HTTP.
 async fn health_handler(State(app): State<Arc<App>>) -> axum::response::Response {
     let db_ok = app
@@ -760,6 +760,10 @@ async fn health_handler(State(app): State<Arc<App>>) -> axum::response::Response
             "version": env!("CARGO_PKG_VERSION"),
             "uptime_s": app.started.elapsed().as_secs(),
             "log": if db_ok { "ok" } else { "unavailable" },
+            // Whether shared memory is sealed on the laptops (MLS) or
+            // readable by this relay. Public on purpose: it is the one fact
+            // about a relay a team should be able to check before trusting it.
+            "memory": if app.provider == crate::proto::PROVIDER_MLS { "sealed" } else { "readable" },
         })),
     )
         .into_response()
@@ -2285,7 +2289,8 @@ mod auth_tests {
         assert_eq!(v["log"], "ok");
         assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
         let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-        assert_eq!(keys.len(), 4, "nothing beyond status, version, uptime and log: {keys:?}");
+        assert_eq!(v["memory"], "readable", "a plaintext relay says it can read memory");
+        assert_eq!(keys.len(), 5, "nothing beyond status, version, uptime, log and memory: {keys:?}");
     }
 
     fn bearer(v: &str) -> axum::http::HeaderMap {

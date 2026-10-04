@@ -7,7 +7,14 @@ void paintSiteNav();
 // own process and its event log, which is what the page used to approximate
 // by probing four endpoints from the browser and counting a refusal as health.
 
-type Health = { status: 'ok' | 'degraded'; version: string; uptime_s: number; log: string };
+type Health = {
+  status: 'ok' | 'degraded';
+  version: string;
+  uptime_s: number;
+  log: string;
+  /** `sealed`: encrypted end to end on the laptops; `readable`: the relay can read it. */
+  memory?: 'sealed' | 'readable';
+};
 type State = 'checking' | 'up' | 'degraded' | 'down';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -45,6 +52,12 @@ function paint(state: State, h: Health | null, ms: number | null): void {
   else delete $('f-log').dataset.ok;
   $('f-up').textContent = h ? uptime(h.uptime_s) : '—';
   $('f-ver').textContent = h ? h.version : '—';
+  const mem = $('f-mem');
+  mem.innerHTML = !h?.memory
+    ? '—'
+    : h.memory === 'sealed'
+      ? '<a href="/docs/#encryption" title="Encrypted on the laptops; the relay stores ciphertext it cannot read">sealed</a>'
+      : '<a href="/docs/#encryption" title="This relay can read the memory it stores">readable</a>';
   $('checked').textContent = `checked ${new Date().toLocaleTimeString([], { hour12: false })}`;
   document.title = state === 'checking' ? 'knoot status' : `knoot status · ${word.toLowerCase()}`;
 }

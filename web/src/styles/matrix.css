@@ -261,8 +261,8 @@ b { color: var(--bright); font-weight: 500; }
 .c4 .field-key i.k-container { background: #17c441; }
 .c4 .field-key i.k-component { background: #6be08a; }
 .c4 .field-key i.k-external { background: #6f8f78; }
-.c4-after { display: flex; gap: 28px; align-items: baseline; flex-wrap: wrap; margin-top: 34px; max-width: 54em; }
-.c4-after p { flex: 1 1 28em; }
+.c4-after { display: flex; flex-direction: column; gap: 14px; margin-top: 34px; max-width: 54em; }
+.c4-links { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 6px; }
 .c4-fallback[hidden] { display: none; }
 
 /* ---------- close + footer ---------- */

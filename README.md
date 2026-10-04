@@ -570,7 +570,8 @@ running. The relay runs `journal_mode=WAL`; a test asserts it, because against
 a rollback journal Litestream copies nothing and reports success.
 
 **Knowing it is down.** `/api/health` is the relay's own answer: up, its event
-log answering, its version and uptime, and nothing about any team. The status
+log answering, its version and uptime, whether it can read the memory it
+stores (`"memory": "sealed"` under MLS), and nothing about any team. The status
 page shows it, and `.github/workflows/uptime.yml` asks it — and whether the
 websocket answers — every five minutes from outside. A failure opens an
 `outage` issue, which GitHub emails to whoever watches the repository; recovery

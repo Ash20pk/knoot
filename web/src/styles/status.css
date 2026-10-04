@@ -35,7 +35,7 @@
 
 /* ---------- the facts behind it ---------- */
 .facts {
-  margin: 0; display: grid; grid-template-columns: repeat(4, 1fr);
+  margin: 0; display: grid; grid-template-columns: repeat(5, 1fr);
   border-bottom: 1px solid var(--rule);
 }
 .facts > div { padding: 22px 0 24px; }
@@ -46,6 +46,8 @@
   font-variant-numeric: tabular-nums; letter-spacing: -.02em;
 }
 .facts dd[data-ok="false"]:not(:empty) { color: var(--warn); }
+.facts dd a { color: var(--bright); border-bottom: 1px solid var(--rule-2); }
+.facts dd a:hover { color: var(--green); text-shadow: none; border-color: var(--green); }
 
 .when { margin-top: 16px; font-size: 13.5px; color: var(--ink-3); }
 .again {
@@ -59,10 +61,14 @@
 .note p { margin-top: 14px; color: var(--ink-2); }
 .note code { background: var(--paper-2); padding: 1px 6px; border-radius: 2px; }
 
+@media (max-width: 1100px) {
+  .facts dd { font-size: 19px; }
+}
 @media (max-width: 760px) {
   .status { padding-top: 48px; }
   .facts { grid-template-columns: repeat(2, 1fr); }
-  .facts > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .facts > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .facts > div:nth-child(even) { padding-left: 24px; border-left: 1px solid var(--rule); }
   .facts > div:nth-child(n + 3) { border-top: 1px solid var(--rule); }
 }
 @media (prefers-reduced-motion: reduce) {

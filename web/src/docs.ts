@@ -10,7 +10,7 @@ if (line) line.textContent = `relay ${RELAY_WS}`;
 const init = document.querySelector('#c-init');
 const login = document.querySelector('#c-login');
 if (init) init.textContent = `knoot init --relay ${RELAY_WS}`;
-if (login) login.textContent = `knoot login --relay ${RELAY_WS} --token <token>`;
+if (login) login.textContent = `knoot join <key> --relay ${RELAY_WS}`;
 
 wireCopyButtons();
 

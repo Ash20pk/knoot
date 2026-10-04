@@ -18,6 +18,14 @@ const viewEl = $('#view')!;
 let team: Team | null = null;
 let role = 'member';
 let relayTeam: TeamPayload | null = null;
+
+// Whether this relay seals memory end to end. Asked once, of the public health
+// answer, and only used to tell an admin what a new teammate will and will not
+// see on day one; a relay that does not say counts as not sealed.
+const memorySealed: Promise<boolean> = fetch('/api/health', { cache: 'no-store' })
+  .then((r) => r.json())
+  .then((h: { memory?: string }) => h.memory === 'sealed')
+  .catch(() => false);
 let live: LiveRepo | null = null;
 let currentRepo: string | null = null;
 
@@ -1075,6 +1083,11 @@ function viewRooms(): void {
 async function viewTeam(): Promise<void> {
   const canAdmin = role === 'owner' || role === 'admin';
   const relayMembers = relayTeam?.members ?? [];
+  // Under MLS the relay cannot hand a newcomer the room's key; a teammate's
+  // daemon admits them. Said where it is decided, so it is not a surprise later.
+  const sealedNote = (await memorySealed)
+    ? `<p class="dim" style="margin-top:10px">Memory here is sealed end to end, so the relay cannot hand a new machine the key. A teammate's daemon admits it the next time one is running; until then the newcomer coordinates normally but cannot read the team's memory. <a href="/docs/#encryption">How this works</a>.</p>`
+    : '';
   viewEl.innerHTML = `
     <div class="page">
       <div class="page-head">
@@ -1091,6 +1104,7 @@ async function viewTeam(): Promise<void> {
         <div class="panel-head"><h2>Invite a teammate</h2></div>
         <div class="panel-body">
           <p>An invitation is to a person, not a link anyone can use: it only works for the address it was sent to, and it lapses after seven days. Nothing is emailed from here, send them the link yourself.</p>
+          ${sealedNote}
           <div class="inline-form" style="margin-top:14px">
             <input id="inv-email" type="email" placeholder="their@email.com">
             <select id="inv-role">
@@ -1107,6 +1121,7 @@ async function viewTeam(): Promise<void> {
         <div class="panel-head"><h2>Add a teammate</h2></div>
         <div class="panel-body">
           <p>This relay has no sign-in behind it, so there is nobody to invite, you create the person and hand them a key. The key is shown once and cannot be read again; send it over something private.</p>
+          ${sealedNote}
           <div class="inline-form" style="margin-top:14px">
             <input id="add-email" type="email" placeholder="their@email.com">
             <input id="add-label" type="text" placeholder="their machine" value="first machine">
