@@ -1,0 +1,6 @@
+# The toolchain CI builds and lints with, pinned so a new Rust release cannot
+# fail a release with a lint nobody has seen locally. Raise it on purpose.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy"]
+profile = "minimal"

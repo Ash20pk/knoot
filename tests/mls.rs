@@ -597,9 +597,7 @@ async fn a_second_laptop_is_added_to_the_group_and_can_read_the_rooms_facts() {
                                 let _ = priya.lock().unwrap().process(&room, &env.blob);
                             }
                             "welcome" => {
-                                if priya.lock().unwrap().join(&room, &env.blob).is_ok() {
-                                    welcomed = true;
-                                }
+                                welcomed |= priya.lock().unwrap().join(&room, &env.blob).is_ok();
                             }
                             _ => {}
                         }
