@@ -1015,40 +1015,56 @@ fn words(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// This machine's working tree, and whether a session's writes landed in it.
+pub type LocalTree<'a> = (&'a std::path::Path, &'a dyn Fn(&str) -> bool);
+
 /// Whether a fact's ground has moved, and what moved it.
 ///
 /// Nobody else has this signal. A memory system that only knows when a fact
 /// was written can tell you it is old; one that knows which files it is about
 /// can tell you it is *wrong*, and name the person who made it so.
 ///
-/// `repo_root` is passed so that a write which restored a file byte for byte
-/// can be told from one that changed it — the hash recorded at authoring is
-/// what that costs, and it is checked here, off the hot path, rather than at
-/// `PreToolUse`.
+/// `local` is this machine's working tree and which sessions wrote into it,
+/// so that a write which restored a file byte for byte can be told from one
+/// that changed it — the hash recorded at authoring is what that costs, and
+/// it is checked here, off the hot path, rather than at `PreToolUse`.
+///
+/// Only a write made *in this tree* can be judged by reading this tree. A
+/// colleague's write happened in their clone; ours still holds the bytes the
+/// fact was written against until we pull, so hashing it would read every
+/// remote change as a revert and silence the flag for exactly the people who
+/// have not seen the change yet.
+///
+/// `remote` is the newest write to each path made on another machine, when
+/// the caller keeps one. `last_write` names only the latest writer, so a
+/// local revert made after a colleague's change would otherwise hide it.
 pub fn staleness(
     held: &Held,
     last_write: &std::collections::HashMap<String, (String, Ts)>,
+    remote: Option<&std::collections::HashMap<String, (String, Ts)>>,
     users: &dyn Fn(&str) -> String,
-    repo_root: Option<&std::path::Path>,
+    local: Option<LocalTree<'_>>,
 ) -> Option<String> {
     let mut worst: Option<(&String, &str, Ts)> = None;
     for p in &held.fact.paths {
-        let Some((session, ts)) = last_write.get(p) else { continue };
-        if *ts <= held.shard.created_ts {
-            continue;
-        }
-        // Written since — but written back to what it was? A peer who reverted
-        // a file has not invalidated anything, and a stale flag that fires on
-        // that is the one that teaches agents to ignore the flag.
-        if let Some(root) = repo_root {
-            if let (Some(now), Some(then)) = (hash_file(root, p), held.fact.hashes.get(p)) {
-                if &now == then {
-                    continue;
+        let candidates = [last_write.get(p), remote.and_then(|r| r.get(p))];
+        for (session, ts) in candidates.into_iter().flatten() {
+            if *ts <= held.shard.created_ts {
+                continue;
+            }
+            // Written since — but written back to what it was? A peer who
+            // reverted a file has not invalidated anything, and a stale flag
+            // that fires on that is the one that teaches agents to ignore it.
+            if let Some((root, _)) = local.filter(|(_, wrote_here)| wrote_here(session)) {
+                if let (Some(now), Some(then)) = (hash_file(root, p), held.fact.hashes.get(p)) {
+                    if &now == then {
+                        continue;
+                    }
                 }
             }
-        }
-        if worst.is_none_or(|(_, _, w)| *ts > w) {
-            worst = Some((p, session, *ts));
+            if worst.is_none_or(|(_, _, w)| *ts > w) {
+                worst = Some((p, session, *ts));
+            }
         }
     }
     let (path, session, _) = worst?;
@@ -1216,24 +1232,60 @@ mod tests {
 
         let mut writes = std::collections::HashMap::new();
         assert!(
-            staleness(held, &writes, &users, None).is_none(),
+            staleness(held, &writes, None, &users, None).is_none(),
             "nothing has been written; nothing is stale"
         );
 
         // A write to a file the fact is not about says nothing about it.
         writes.insert("src/other.rs".to_string(), ("s2".to_string(), s.created_ts + 1000));
-        assert!(staleness(held, &writes, &users, None).is_none());
+        assert!(staleness(held, &writes, None, &users, None).is_none());
 
         // A write to the file it *is* about names who moved the ground.
         writes.insert("src/http/client.rs".to_string(), ("s2".to_string(), s.created_ts + 1000));
-        let why = staleness(held, &writes, &users, None).expect("this is the signal");
+        let why = staleness(held, &writes, None, &users, None).expect("this is the signal");
         assert!(why.contains("s2-user"), "{why}");
         assert!(why.contains("src/http/client.rs"), "{why}");
 
         // A write that predates the fact does not: the fact already knows.
         let mut older = std::collections::HashMap::new();
         older.insert("src/http/client.rs".to_string(), ("s2".to_string(), s.created_ts - 1000));
-        assert!(staleness(held, &older, &users, None).is_none());
+        assert!(staleness(held, &older, None, &users, None).is_none());
+    }
+
+    #[test]
+    fn a_colleagues_write_is_stale_even_where_the_change_has_not_been_pulled() {
+        let root = std::env::temp_dir().join(format!("knoot-stale-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/billing.js"), "const cents = 1;\n").unwrap();
+        let mut f = fact("money", "integer cents", &["src/billing.js"]);
+        f.hashes.insert("src/billing.js".into(), hash_file(&root, "src/billing.js").unwrap());
+        let s = shard_of(&f, "m1", "ash@example.com", None);
+        let mut cache = Cache::default();
+        cache.apply(&Plaintext, &scope(), s.clone());
+        let held = cache.by_id(&s.id).unwrap();
+        let users = |x: &str| format!("{x}-user");
+        let mut writes = std::collections::HashMap::new();
+        writes.insert("src/billing.js".to_string(), ("remote".to_string(), s.created_ts + 1000));
+
+        // Our tree still has the authored bytes: the colleague's change lives
+        // in their clone. That is not a revert, and must not read as one.
+        let mine = |sess: &str| sess == "local";
+        let why = staleness(held, &writes, None, &users, Some((&root, &mine)))
+            .expect("a peer on another machine moved the ground");
+        assert!(why.contains("remote-user"), "{why}");
+
+        // The same bytes after a write made here *is* a revert.
+        writes.insert("src/billing.js".to_string(), ("local".to_string(), s.created_ts + 1000));
+        assert!(staleness(held, &writes, None, &users, Some((&root, &mine))).is_none());
+
+        // But a revert here does not undo a colleague's change there: their
+        // write, kept apart from the last-writer map, still counts.
+        let mut remote = std::collections::HashMap::new();
+        remote.insert("src/billing.js".to_string(), ("remote".to_string(), s.created_ts + 500));
+        let why = staleness(held, &writes, Some(&remote), &users, Some((&root, &mine)))
+            .expect("a local revert must not hide a peer's earlier change");
+        assert!(why.contains("remote-user"), "{why}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -400,6 +400,62 @@ async fn a_fact_is_flagged_stale_when_the_code_it_names_is_written() {
     assert!(brief.contains("src/http/client.rs"), "{brief}");
 }
 
+/// Two machines, two clones, one repo. Priya's change lives in her clone; ash's
+/// has not pulled it and his daemon only came up afterwards — a laptop that
+/// rebooted. Live, both halves silenced the flag: the fresh daemon was never
+/// told about writes made before it connected, and hashing ash's own,
+/// unchanged tree read priya's change as a revert. Then a local write that
+/// leaves the file as it was must not hide hers either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_colleagues_change_is_stale_on_a_machine_that_rebooted_and_has_not_pulled() {
+    let (c, priya_root, id) = repo("reboot").await;
+    let ash_root = tmp("reboot-ash");
+    init_repo(&ash_root, &c.url, &id);
+    std::fs::create_dir_all(ash_root.join("src/http")).unwrap();
+    std::fs::write(ash_root.join("src/http/client.rs"), "fn get() {}\n").unwrap();
+
+    remember(&c.sock, &priya_root, &["--name", "retry", "--path", "src/http/client.rs", "the client retries three times"]);
+    settle().await;
+
+    // Priya changes the file, in her clone, through her daemon.
+    let edit = |session: &str, root: &Path| {
+        json!({
+            "hook_event_name": "PostToolUse", "session_id": session,
+            "cwd": root.to_string_lossy(), "tool_name": "Edit",
+            "tool_input": { "file_path": format!("{}/src/http/client.rs", root.to_string_lossy()) }
+        })
+    };
+    joins(&c.sock, &priya_root, "s-priya", "priya");
+    std::fs::write(priya_root.join("src/http/client.rs"), "fn get() { retry(5) }\n").unwrap();
+    pre_write(&c.sock, &priya_root, "s-priya", "priya", "src/http/client.rs");
+    hook_as(&c.sock, edit("s-priya", &priya_root), "priya");
+    settle().await;
+
+    // Ash's daemon starts only now.
+    let ash_sock = start_daemon().await;
+    let mut listed = String::new();
+    for _ in 0..20 {
+        listed = recall(&ash_sock, &ash_root);
+        if listed.contains("retries three times") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(listed.contains("retries three times"), "the fact reached the new daemon:\n{listed}");
+    assert!(listed.contains("possibly stale"), "a write from before it connected still counts:\n{listed}");
+
+    // Ash's session writes the file and leaves it byte for byte as it was.
+    joins(&ash_sock, &ash_root, "s-ash", "ash");
+    pre_write(&ash_sock, &ash_root, "s-ash", "ash", "src/http/client.rs");
+    hook_as(&ash_sock, edit("s-ash", &ash_root), "ash");
+    settle().await;
+    let listed = recall(&ash_sock, &ash_root);
+    assert!(
+        listed.contains("possibly stale"),
+        "a revert in this tree does not undo a change in hers:\n{listed}"
+    );
+}
+
 /// MemClaw's second production bug, end to end: a near-duplicate filter that
 /// rejected a contradicting write. A contradiction *is* a near-duplicate, and
 /// the second statement must win without the first being lost.

@@ -356,6 +356,12 @@ pub enum ServerMsg {
         /// The key provider this deployment seals memory with.
         #[serde(default)]
         provider: Option<String>,
+        /// The last write to each path this identity may see. A daemon that
+        /// connects after a write — a laptop that rebooted — otherwise has no
+        /// idea the ground moved, and every stale flag it owed is silently
+        /// gone.
+        #[serde(default)]
+        writes: Vec<PeerWrite>,
     },
     Event { seq: u64, event: Event },
     ClaimResp {
@@ -969,8 +975,27 @@ pub enum DReq {
     },
     /// The tool call behind a `PreWriteBatch` has run.
     PostWriteBatch { repo_root: String, session: String, #[serde(default)] paths: Vec<String> },
-    SessionStart { repo_root: String, session: String, user: String, branch: String },
-    Intent { repo_root: String, session: String, text: String, user: String, #[serde(default)] branch: String },
+    /// `agent_pid` is the process that fired the hook — the agent, so the
+    /// daemon can notice it has died without saying goodbye. `None` for a
+    /// person's session, which leaves through `SessionEnd` itself.
+    SessionStart {
+        repo_root: String,
+        session: String,
+        user: String,
+        branch: String,
+        #[serde(default)]
+        agent_pid: Option<u32>,
+    },
+    Intent {
+        repo_root: String,
+        session: String,
+        text: String,
+        user: String,
+        #[serde(default)]
+        branch: String,
+        #[serde(default)]
+        agent_pid: Option<u32>,
+    },
     SessionEnd { repo_root: String, session: String },
     /// Send a message to a peer user, or to everyone when `to` is None.
     /// Identity travels with the request: Claude Code exposes no session id to

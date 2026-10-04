@@ -1435,7 +1435,7 @@ async fn memory_handler(
         .map(|h| {
             // No repo root here: a write back to identical bytes cannot be told
             // apart on the relay, so the flag says "possibly", as it always has.
-            let stale = crate::memory::staleness(h, &last_write, &who, None);
+            let stale = crate::memory::staleness(h, &last_write, None, &who, None);
             serde_json::json!({
                 "id": h.shard.id, "kind": h.shard.kind, "name": h.fact.name, "text": h.fact.text,
                 "paths": h.fact.paths, "decisions": h.fact.decisions, "derived": h.fact.derived,
@@ -1767,6 +1767,18 @@ async fn client(sock: WebSocket, app: Arc<App>, id: crate::teams::Identity) -> R
                 sessions: st.view.sessions.values().cloned().collect(),
                 me: me.clone(),
                 provider: Some(app.provider.clone()),
+                writes: st
+                    .view
+                    .last_write
+                    .iter()
+                    .filter(|(path, _)| id.may_enter(&repo_name, &crate::config::area_of(&areas, path)))
+                    .map(|(path, (session, ts))| crate::proto::PeerWrite {
+                        session: session.clone(),
+                        user: st.view.authors.get(session).cloned().unwrap_or_default(),
+                        path: path.clone(),
+                        ts: *ts,
+                    })
+                    .collect(),
             },
             st.tx.subscribe(),
         )

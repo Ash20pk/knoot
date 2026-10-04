@@ -294,6 +294,7 @@ pub async fn start_granting_relay() -> String {
                             sessions: vec![],
                             me: None,
                             provider: None,
+                            writes: vec![],
                         }),
                         ClientMsg::ClaimReq { id, .. } => Some(ServerMsg::ClaimResp {
                             hub: false,

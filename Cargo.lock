@@ -1351,6 +1351,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "include_dir",
+ "libc",
  "openmls",
  "openmls_basic_credential",
  "openmls_rust_crypto",

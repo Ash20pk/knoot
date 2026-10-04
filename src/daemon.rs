@@ -58,6 +58,16 @@ struct RepoConn {
     /// exactly what a peer's write between turns invalidates, and clearing it
     /// at the turn boundary would throw away the only case that matters.
     reads: Arc<Mutex<HashMap<String, HashMap<String, Ts>>>>,
+    /// Sessions whose writes landed in *this* working tree, because their
+    /// hooks came through this daemon. The staleness revert check reads the
+    /// local tree, which says nothing about a write made in someone else's
+    /// clone — so it may only be consulted for these.
+    wrote_here: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// The newest write to each path made on *another* machine. The view's
+    /// `last_write` keeps one writer per path, so a local edit made after a
+    /// colleague's — a revert, say — would hide theirs; this keeps it in
+    /// sight, because only a local write can be judged by reading our tree.
+    remote_writes: Arc<Mutex<HashMap<String, (String, Ts)>>>,
     /// How this deployment seals memory. `Plaintext` until a Welcome says
     /// otherwise, and swapped for `Mls` behind the same interface — which is
     /// the whole point of the interface: nothing below this line changes.
@@ -165,6 +175,11 @@ struct Daemon {
     /// Paths a `PreWriteBatch` said would stop existing, keyed by (repo_root,
     /// session), confirmed and announced from `PostWriteBatch` once they have.
     patch_removals: Mutex<HashMap<(String, String), Vec<PatchRemoval>>>,
+    /// The agent process behind each session, keyed by (repo_root, session).
+    /// An agent that is killed never fires `SessionEnd`, and its claims would
+    /// otherwise hold for the whole lease — ten minutes of peers blocked by a
+    /// process that no longer exists.
+    agents: Mutex<HashMap<(String, String), u32>>,
 }
 
 pub async fn run() -> Result<()> {
@@ -175,10 +190,21 @@ pub async fn run() -> Result<()> {
 pub async fn run_on(sock: PathBuf) -> Result<()> {
     std::fs::create_dir_all(sock.parent().unwrap())?;
     let _ = std::fs::remove_file(&sock);
-    let listener = UnixListener::bind(&sock)?;
+    // macOS caps a socket path at 104 bytes and Linux at 108, and the OS
+    // error ("path must be shorter than SUN_LEN") names neither the path
+    // nor the way out.
+    let listener = UnixListener::bind(&sock).map_err(|e| {
+        anyhow::anyhow!(
+            "cannot listen on {} ({e}) — a socket path must be under ~100 bytes; \
+             set KNOOT_SOCK to a shorter one, e.g. KNOOT_SOCK=/tmp/knootd-$USER.sock, \
+             and set it for every knoot command and agent on this machine",
+            sock.display()
+        )
+    })?;
     eprintln!("knootd listening on {}", sock.display());
 
     let daemon = Arc::new(Daemon::default());
+    tokio::spawn(reap_dead_agents(daemon.clone()));
     loop {
         let (stream, _) = listener.accept().await?;
         let d = daemon.clone();
@@ -425,8 +451,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                     continue;
                 }
                 let ev = Event::FileWritten { session: session.clone(), user: user.clone(), path: path.clone(), ts: now_ms() };
-                rc.view.lock().unwrap().apply(&ev);
-                let _ = rc.tx.send(ClientMsg::Append { event: ev });
+                record_write(&rc, ev);
                 let peers = {
                     let v = rc.view.lock().unwrap();
                     let branch = v.sessions.get(&session).map(|s| s.branch.clone()).unwrap_or_default();
@@ -453,8 +478,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                 let user = user_of(&rc, &session);
                 let ev =
                     Event::FileWritten { session: session.clone(), user, path: path.clone(), ts: now_ms() };
-                rc.view.lock().unwrap().apply(&ev);
-                let _ = rc.tx.send(ClientMsg::Append { event: ev });
+                record_write(&rc, ev);
                 // Not a block and not mail: a note about work that is going to
                 // meet this write at merge, delivered while the turn can still
                 // act on it.
@@ -469,8 +493,9 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             }
             DResp::Ok
         }
-        DReq::SessionStart { repo_root, session, user, branch } => {
+        DReq::SessionStart { repo_root, session, user, branch, agent_pid } => {
             let Some(rc) = ensure_repo(d, &repo_root).await else { return DResp::Ok };
+            track_agent(d, &repo_root, &session, agent_pid).await;
             let ev = Event::SessionStarted { session: session.clone(), user, branch, ts: now_ms() };
             rc.view.lock().unwrap().apply(&ev);
             let _ = rc.tx.send(ClientMsg::Append { event: ev });
@@ -503,7 +528,8 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                 context,
             }
         }
-        DReq::Intent { repo_root, session, text, user, branch } => {
+        DReq::Intent { repo_root, session, text, user, branch, agent_pid } => {
+            track_agent(d, &repo_root, &session, agent_pid).await;
             let Some(rc) = ensure_repo(d, &repo_root).await else { return DResp::Ok };
             ensure_session(&rc, &session, &user);
             // Before recording ours, or every session matches itself.
@@ -566,23 +592,9 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             }
         }
         DReq::SessionEnd { repo_root, session } => {
+            d.agents.lock().unwrap().remove(&(repo_root.clone(), session.clone()));
             if let Some(rc) = ensure_repo(d, &repo_root).await {
-                // A session's context is memory in the sense that a room is a
-                // memory: it exists while people are in it. Outliving the
-                // session would make a finished plan look like a live one,
-                // which is worse than no plan at all.
-                let ids = rc
-                    .mem
-                    .lock()
-                    .unwrap()
-                    .ids_named(crate::memory::Kind::SessionContext, &session);
-                if !ids.is_empty() {
-                    rc.mem.lock().unwrap().forget(&ids);
-                    let _ = rc.tx.send(ClientMsg::MemForget { ids });
-                }
-                let ev = Event::SessionEnded { session: session.clone(), ts: now_ms() };
-                rc.view.lock().unwrap().apply(&ev);
-                let _ = rc.tx.send(ClientMsg::ReleaseSession { session });
+                end_session(&rc, session);
             }
             DResp::Ok
         }
@@ -687,8 +699,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                     path: path.clone(),
                     ts: now_ms(),
                 };
-                rc.view.lock().unwrap().apply(&ev);
-                let _ = rc.tx.send(ClientMsg::Append { event: ev });
+                record_write(&rc, ev);
             }
 
             // A path the command was expected to remove, and which is in fact
@@ -757,8 +768,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                             path: path.clone(),
                             ts: now_ms(),
                         };
-                        rc.view.lock().unwrap().apply(&ev);
-                        let _ = rc.tx.send(ClientMsg::Append { event: ev });
+                        record_write(&rc, ev);
                     }
                 }
             }
@@ -936,6 +946,9 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             // cold daemon has to be given the same beat `who` is given.
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             let (last_write, users) = write_context(&rc);
+            let here = rc.wrote_here.lock().unwrap().clone();
+            let mine = |s: &str| here.contains(s);
+            let remote = rc.remote_writes.lock().unwrap().clone();
             let lookup =
                 |s: &str| users.get(s).cloned().unwrap_or_else(|| s.to_string());
             let root = std::path::Path::new(&repo_root);
@@ -961,7 +974,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             let items = held
                 .into_iter()
                 .map(|h| {
-                    let stale = crate::memory::staleness(h, &last_write, &lookup, Some(root));
+                    let stale = crate::memory::staleness(h, &last_write, Some(&remote), &lookup, Some((root, &mine)));
                     format!(
                         "[{}] {}\n  {}\n  — {}, {} ago{}{}",
                         h.shard.kind,
@@ -1440,6 +1453,9 @@ fn session_paths(rc: &Arc<RepoConn>, session: &str) -> Vec<String> {
 fn memory_lines(rc: &Arc<RepoConn>, repo_root: &str, paths: &[String]) -> Vec<String> {
     use crate::memory::Kind;
     let (last_write, users) = write_context(rc);
+    let here = rc.wrote_here.lock().unwrap().clone();
+    let mine = |s: &str| here.contains(s);
+    let remote = rc.remote_writes.lock().unwrap().clone();
     let root = std::path::Path::new(repo_root);
     let lookup = |session: &str| users.get(session).cloned().unwrap_or_else(|| session.to_string());
 
@@ -1452,7 +1468,7 @@ fn memory_lines(rc: &Arc<RepoConn>, repo_root: &str, paths: &[String]) -> Vec<St
     let mut out = Vec::new();
     let mut used = 0;
     for h in held {
-        let stale = crate::memory::staleness(h, &last_write, &lookup, Some(root));
+        let stale = crate::memory::staleness(h, &last_write, Some(&remote), &lookup, Some((root, &mine)));
         let line = format!(
             "{} — {} ({}{}){}",
             h.fact.name,
@@ -1487,6 +1503,9 @@ fn memory_lines(rc: &Arc<RepoConn>, repo_root: &str, paths: &[String]) -> Vec<St
 fn cache_lines(rc: &Arc<RepoConn>, repo_root: &str, paths: &[String]) -> Vec<String> {
     use crate::memory::Kind;
     let (last_write, users) = write_context(rc);
+    let here = rc.wrote_here.lock().unwrap().clone();
+    let mine = |s: &str| here.contains(s);
+    let remote = rc.remote_writes.lock().unwrap().clone();
     let root = std::path::Path::new(repo_root);
     let lookup = |session: &str| users.get(session).cloned().unwrap_or_else(|| session.to_string());
 
@@ -1500,7 +1519,7 @@ fn cache_lines(rc: &Arc<RepoConn>, repo_root: &str, paths: &[String]) -> Vec<Str
     let mut used = 0;
     for h in held {
         if Kind::RepoCache.invalidated_by_writes()
-            && crate::memory::staleness(h, &last_write, &lookup, Some(root)).is_some()
+            && crate::memory::staleness(h, &last_write, Some(&remote), &lookup, Some((root, &mine))).is_some()
         {
             continue;
         }
@@ -1611,6 +1630,127 @@ fn context_lines(rc: &Arc<RepoConn>, mine: &str) -> Vec<String> {
         out.push(line);
     }
     out
+}
+
+/// Leave the room: drop the session's context and release everything it
+/// holds. Shared by a `SessionEnd` the agent sent and one the daemon inferred
+/// from a dead process, so the two cannot drift.
+fn end_session(rc: &Arc<RepoConn>, session: String) {
+    // A session's context is memory in the sense that a room is a memory: it
+    // exists while people are in it. Outliving the session would make a
+    // finished plan look like a live one, which is worse than no plan at all.
+    let ids = rc.mem.lock().unwrap().ids_named(crate::memory::Kind::SessionContext, &session);
+    if !ids.is_empty() {
+        rc.mem.lock().unwrap().forget(&ids);
+        let _ = rc.tx.send(ClientMsg::MemForget { ids });
+    }
+    let ev = Event::SessionEnded { session: session.clone(), ts: now_ms() };
+    rc.view.lock().unwrap().apply(&ev);
+    let _ = rc.tx.send(ClientMsg::ReleaseSession { session });
+}
+
+/// How often the daemon checks that the agents behind its sessions are alive.
+const REAP_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Remember which process a session belongs to. The hook reports its parent,
+/// which is the agent unless a shell stood in between and did not exec — so
+/// shells are climbed past while the hook is still alive to keep them up.
+async fn track_agent(d: &Arc<Daemon>, repo_root: &str, session: &str, pid: Option<u32>) {
+    let Some(mut pid) = pid else { return };
+    let key = (repo_root.to_string(), session.to_string());
+    if d.agents.lock().unwrap().contains_key(&key) {
+        return;
+    }
+    // Only a process that is not a shell is trusted as the agent. A shell
+    // left at the top of the climb may be a short-lived wrapper, and tracking
+    // one would end a live session the moment it exited.
+    let mut agent = None;
+    for _ in 0..4 {
+        let Ok(out) = tokio::process::Command::new("ps")
+            .args(["-o", "ppid=,comm=", "-p", &pid.to_string()])
+            .output()
+            .await
+        else {
+            return; // no `ps`: no liveness, and the lease stays the backstop
+        };
+        let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let mut parts = line.splitn(2, char::is_whitespace);
+        let (Some(ppid), Some(comm)) = (parts.next(), parts.next()) else { return };
+        let name = comm.trim().rsplit('/').next().unwrap_or("").trim_start_matches('-').to_string();
+        if !matches!(name.as_str(), "sh" | "bash" | "zsh" | "dash" | "fish" | "ksh") {
+            agent = Some(name);
+            break;
+        }
+        match ppid.trim().parse() {
+            Ok(p) if p > 1 => pid = p,
+            _ => return,
+        }
+    }
+    let Some(name) = agent else { return };
+    eprintln!("knootd: session {session} is agent pid {pid} ({name})");
+    d.agents.lock().unwrap().insert(key, pid);
+}
+
+/// Which of these processes still exist, or `None` if that cannot be told —
+/// in which case nothing is reaped. Releasing a live agent's claims would
+/// let a peer write over it; holding a dead one's is only a wait.
+async fn alive(pids: &[u32]) -> Option<std::collections::HashSet<u32>> {
+    let list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    let out = tokio::process::Command::new("ps").args(["-o", "pid=", "-p", &list]).output().await.ok()?;
+    // `ps` exits 1 when any pid is missing, so the status says nothing; an
+    // empty answer with a failure and no output at all is the unknowable case.
+    if !out.status.success() && out.stdout.is_empty() && !out.stderr.is_empty() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).split_whitespace().filter_map(|p| p.parse().ok()).collect())
+}
+
+/// End every session whose agent has exited without saying so.
+async fn reap_dead_agents(d: Arc<Daemon>) {
+    loop {
+        tokio::time::sleep(REAP_EVERY).await;
+        let tracked: Vec<((String, String), u32)> =
+            d.agents.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
+        if tracked.is_empty() {
+            continue;
+        }
+        let pids: Vec<u32> = tracked.iter().map(|(_, p)| *p).collect();
+        let Some(live) = alive(&pids).await else { continue };
+        for ((repo_root, session), pid) in tracked {
+            if live.contains(&pid) {
+                continue;
+            }
+            d.agents.lock().unwrap().remove(&(repo_root.clone(), session.clone()));
+            eprintln!("knootd: agent pid {pid} for session {session} has exited; releasing its claims");
+            // Through `ensure_repo`, which canonicalises: the map is keyed by
+            // the resolved path, not the one the hook reported.
+            if let Some(rc) = ensure_repo(&d, &repo_root).await {
+                end_session(&rc, session);
+            }
+        }
+    }
+}
+
+/// Keep the newest write to a path that did not happen in this tree. Our own
+/// writes come back from the relay too; they are recognised and skipped.
+fn note_remote_write(rc: &Arc<RepoConn>, session: &str, path: &str, ts: Ts) {
+    if rc.wrote_here.lock().unwrap().contains(session) {
+        return;
+    }
+    let mut remote = rc.remote_writes.lock().unwrap();
+    if remote.get(path).is_none_or(|(_, t)| ts > *t) {
+        remote.insert(path.to_string(), (session.to_string(), ts));
+    }
+}
+
+/// Append a write this daemon saw happen in its own tree, and remember the
+/// session as local so staleness may judge it by reading that tree.
+fn record_write(rc: &Arc<RepoConn>, ev: Event) {
+    if let Event::FileWritten { session, .. } = &ev {
+        rc.wrote_here.lock().unwrap().insert(session.clone());
+    }
+    rc.view.lock().unwrap().apply(&ev);
+    let _ = rc.tx.send(ClientMsg::Append { event: ev });
 }
 
 /// The log's view of what has been written, and who by. Shared by every
@@ -2527,6 +2667,8 @@ async fn ensure_repo(d: &Arc<Daemon>, repo_root: &str) -> Option<Arc<RepoConn>> 
         tx,
         view: Arc::new(Mutex::new(view)),
         reads: Arc::new(Mutex::new(HashMap::new())),
+        wrote_here: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        remote_writes: Arc::new(Mutex::new(HashMap::new())),
         provider: Arc::new(Mutex::new(Arc::new(crate::memory::Plaintext))),
         mls: Arc::new(Mutex::new(None)),
         daemon: Arc::downgrade(d),
@@ -2607,11 +2749,23 @@ async fn relay_loop(cfg: RepoConfig, rc: Arc<RepoConn>, mut rx: mpsc::UnboundedR
                             let Some(Ok(WsMsg::Text(t))) = inc else { break };
                             let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) else { continue };
                             match sm {
-                                ServerMsg::Welcome { claims, sessions, me, provider, .. } => {
+                                ServerMsg::Welcome { claims, sessions, me, provider, writes, .. } => {
                                     {
                                         let mut v = rc.view.lock().unwrap();
                                         v.claims = claims;
                                         v.sessions = sessions.into_iter().map(|s| (s.session.clone(), s)).collect();
+                                        for w in &writes {
+                                            let newer = v.last_write.get(&w.path).is_none_or(|(_, t)| w.ts > *t);
+                                            if newer {
+                                                v.last_write.insert(w.path.clone(), (w.session.clone(), w.ts));
+                                            }
+                                            if !w.user.is_empty() {
+                                                v.authors.entry(w.session.clone()).or_insert_with(|| w.user.clone());
+                                            }
+                                        }
+                                    }
+                                    for w in writes {
+                                        note_remote_write(&rc, &w.session, &w.path, w.ts);
                                     }
                                     // Sealing is the deployment's choice, so the
                                     // relay's answer is what selects it. A
@@ -2712,6 +2866,9 @@ async fn relay_loop(cfg: RepoConfig, rc: Arc<RepoConn>, mut rx: mpsc::UnboundedR
                                 }
                                 ServerMsg::Event { event, .. } => {
                                     deliver(&rc, &event);
+                                    if let Event::FileWritten { session, path, ts, .. } = &event {
+                                        note_remote_write(&rc, session, path, *ts);
+                                    }
                                     rc.view.lock().unwrap().apply(&event);
                                 }
                                 ServerMsg::ClaimResp { ref id, .. } => {

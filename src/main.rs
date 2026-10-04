@@ -228,7 +228,19 @@ enum MemberCmd {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    match Cli::parse().cmd {
+    let cmd = Cli::parse().cmd;
+    // Rust ignores SIGPIPE, so `knoot why src/x | head` panicked on the first
+    // write after `head` left. A command that prints and exits should just
+    // stop, as every other CLI does. Not the long-lived processes, whose
+    // sockets would then kill them, and not the hook, which must exit 0.
+    if !matches!(cmd, Cmd::Relay { .. } | Cmd::Daemon | Cmd::Hook { .. } | Cmd::Present { .. } | Cmd::Watch) {
+        // SAFETY: restoring the default disposition of one signal, before any
+        // thread is doing I/O that depends on it.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+    match cmd {
         Cmd::Relay { listen, db, lab_dir, agents, agent_program } => {
             let db = db.unwrap_or_else(|| dirs::home_dir().unwrap().join(".knoot/relay.db"));
             let lab = lab_dir.map(|dir| relay::LabOpts { dir, agents, program: agent_program });
@@ -353,20 +365,65 @@ fn init(relay: String, repo: Option<String>, agent: &str) -> Result<()> {
              KNOOT_BIN to its location."
         );
     }
-    println!("\nNext steps:");
-    println!("  1. start a relay somewhere shared:   knoot relay --listen 0.0.0.0:7420");
-    println!("  2. start the local daemon:           knoot daemon");
-    println!("  3. restart agent sessions in this repo — they now coordinate.");
-    if agents.contains(&hook::Agent::Codex) {
-        println!("     Codex asks you to trust a repo's hooks once: run /hooks inside Codex and trust them.");
+    // Only the steps still owed. A list that says "start a relay" to someone
+    // who just pointed at a live one teaches them to skip the list.
+    let local_relay = ["://127.0.0.1", "://localhost", "://0.0.0.0", "://[::1]"].iter().any(|h| relay.contains(h));
+    let relay_up = relay_answers(&relay);
+    let daemon_up = hook::call_daemon(&DReq::Who { repo_root: root.to_string_lossy().to_string() }).is_some();
+    let has_key = config::token_for(&relay).is_some();
+    let mut steps: Vec<String> = Vec::new();
+    if !relay_up {
+        steps.push(if local_relay {
+            "start a relay somewhere shared:   knoot relay --listen 0.0.0.0:7420".to_string()
+        } else {
+            format!("check the relay is reachable:     {relay} did not answer just now")
+        });
     }
+    if !daemon_up {
+        steps.push("start the local daemon:           knoot daemon".into());
+    }
+    if !local_relay && !has_key {
+        steps.push(format!(
+            "store your device key:            knoot join <key> --relay {relay}\n     \
+             (a self-hosted relay with one shared token: knoot login --relay {relay} --token <token>)"
+        ));
+    }
+    let mut restart = "restart agent sessions in this repo — they now coordinate.".to_string();
+    if agents.contains(&hook::Agent::Codex) {
+        restart.push_str("\n     Codex asks you to trust a repo's hooks once: run /hooks inside Codex and trust them.");
+    }
+    steps.push(restart);
     let files: Vec<String> = written.iter().map(|p| {
         p.strip_prefix(&root).unwrap_or(p).to_string_lossy().to_string()
     }).collect();
-    println!("  4. commit .knoot.toml and {} — teammates who clone are enrolled.", files.join(" and "));
-    println!("     Each of them needs the binary on PATH, `knoot daemon`, and, on a hosted");
-    println!("     relay, `knoot login`.");
+    steps.push(format!(
+        "commit .knoot.toml and {} — teammates who clone are enrolled.\n     \
+         Each of them needs the binary on PATH, `knoot daemon`, and {}.",
+        files.join(" and "),
+        if local_relay { "the relay reachable" } else { "their own key: `knoot join <key>`" }
+    ));
+    println!("\nNext steps:");
+    for (i, step) in steps.iter().enumerate() {
+        println!("  {}. {step}", i + 1);
+    }
     Ok(())
+}
+
+/// Whether something is listening at the relay's host and port. A TCP
+/// connect, not a handshake: enough to tell "start a relay" from "you already
+/// have one", which is all `init` needs to know.
+fn relay_answers(url: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    let origin = config::relay_origin(url);
+    let (scheme, host) = origin.split_once("://").unwrap_or(("ws", &origin));
+    let addr = if host.rsplit(':').next().is_some_and(|p| p.parse::<u16>().is_ok()) && !host.ends_with(']') {
+        host.to_string()
+    } else {
+        format!("{host}:{}", if scheme == "wss" { 443 } else { 80 })
+    };
+    addr.to_socket_addrs().ok().and_then(|mut a| a.next()).is_some_and(|a| {
+        std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(800)).is_ok()
+    })
 }
 
 /// `.knoot/` holds the outbox an agent writes messages into when its shell
@@ -1151,6 +1208,7 @@ async fn present(name: Option<String>, doing: Option<String>, interval: u64) -> 
         session: session.clone(),
         user: user.clone(),
         branch,
+        agent_pid: None,
     });
     if let Some(text) = &doing {
         hook::call_daemon(&DReq::Intent {
@@ -1159,6 +1217,7 @@ async fn present(name: Option<String>, doing: Option<String>, interval: u64) -> 
             text: text.clone(),
             user: user.clone(),
             branch: git_branch_of(&repo_root),
+            agent_pid: None,
         });
     }
 

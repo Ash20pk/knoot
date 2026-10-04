@@ -161,6 +161,7 @@ fn inner(agent: Option<Agent>) {
             session,
             user: session_user(),
             branch: git_branch(&cwd),
+            agent_pid: Some(std::os::unix::process::parent_id()),
         },
         "UserPromptSubmit" => {
             let prompt = v["prompt"].as_str().unwrap_or("");
@@ -170,7 +171,14 @@ fn inner(agent: Option<Agent>) {
             let text: String = prompt.chars().take(160).collect();
             // Branch travels every turn, not just at SessionStart: a session
             // that checks out a new branch must claim under the new one.
-            DReq::Intent { repo_root, session, text, user: session_user(), branch: git_branch(&cwd) }
+            DReq::Intent {
+                repo_root,
+                session,
+                text,
+                user: session_user(),
+                branch: git_branch(&cwd),
+                agent_pid: Some(std::os::unix::process::parent_id()),
+            }
         }
         "SessionEnd" => DReq::SessionEnd { repo_root, session },
         // The moment an agent tries to finish is the only reliable chance to
@@ -508,6 +516,7 @@ fn sandbox_note(agent: Agent) -> Option<&'static str> {
 /// content: a recipient name and a few lines of text, nothing is parsed.
 fn flush_outbox(root: &std::path::Path) {
     let dir = root.join(OUTBOX_DIR);
+    recover_inflight(&dir);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
     let repo_root = root.to_string_lossy().to_string();
     for e in entries.flatten() {
@@ -520,14 +529,18 @@ fn flush_outbox(root: &std::path::Path) {
         if to.is_empty() || to.starts_with('.') {
             continue;
         }
-        let Ok(raw) = std::fs::read(&path) else { continue };
-        if raw.len() > 8 * 1024 {
+        if std::fs::metadata(&path).map_or(true, |m| m.len() > 8 * 1024) {
             // Not a message. Leave it where it is rather than send a file.
             continue;
         }
+        // Several hooks can run at once — Codex fires them concurrently — and
+        // each would read, send and delete the same file. Only one can move
+        // it, so only one sends it.
+        let Some(taken) = take(&path) else { continue };
+        let Ok(raw) = std::fs::read(&taken) else { continue };
         let text = String::from_utf8_lossy(&raw).trim().to_string();
         if text.is_empty() {
-            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(&taken);
             continue;
         }
         let req = DReq::Msg {
@@ -537,9 +550,69 @@ fn flush_outbox(root: &std::path::Path) {
             text,
         };
         match call_daemon(&req) {
-            Some(DResp::Err { .. }) | None => {} // try again on the next hook
-            Some(_) => { let _ = std::fs::remove_file(&path); }
+            Some(DResp::Err { .. }) | None => give_back(&taken, &path), // next hook tries again
+            Some(_) => { let _ = std::fs::remove_file(&taken); }
         }
+    }
+    tidy_inflight(&dir);
+}
+
+/// Where a queued file sits while one hook is sending it.
+const INFLIGHT: &str = ".inflight";
+
+/// Claim a queued file for sending by moving it under `.inflight/`. A rename
+/// is atomic, so when several hooks reach the same file only one gets it and
+/// the message is sent once rather than once per hook.
+fn take(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = path.parent()?.join(INFLIGHT);
+    let _ = std::fs::create_dir_all(&dir);
+    let name = path.file_name()?.to_str()?;
+    let taken = dir.join(format!("{}.{name}", std::process::id()));
+    std::fs::rename(path, &taken).ok()?;
+    // A rename keeps the agent's mtime; the recovery clock starts now.
+    if let Ok(f) = std::fs::File::options().append(true).open(&taken) {
+        let _ = f.set_modified(std::time::SystemTime::now());
+    }
+    Some(taken)
+}
+
+/// Put back a file that could not be sent. If the agent has queued a new one
+/// under the same name meanwhile, the old text goes in front of it rather
+/// than over it.
+fn give_back(taken: &std::path::Path, original: &std::path::Path) {
+    if !original.exists() {
+        let _ = std::fs::rename(taken, original);
+        return;
+    }
+    if let (Ok(old), Ok(new)) = (std::fs::read(taken), std::fs::read(original)) {
+        let mut both = old;
+        both.push(b'\n');
+        both.extend(new);
+        if std::fs::write(original, both).is_ok() {
+            let _ = std::fs::remove_file(taken);
+        }
+    }
+}
+
+/// Drop `.inflight/` once it is empty, so a flushed queue leaves nothing
+/// behind. Only an empty directory can be removed, so a send in progress
+/// keeps it; one that loses the race simply goes out on the next hook.
+fn tidy_inflight(dir: &std::path::Path) {
+    let _ = std::fs::remove_dir(dir.join(INFLIGHT));
+}
+
+/// A hook killed mid-send leaves its file under `.inflight/`. After a minute
+/// nobody is still sending it, so it goes back to be tried again.
+fn recover_inflight(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir.join(INFLIGHT)) else { return };
+    for e in entries.flatten() {
+        let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+        if age.is_none_or(|a| a.as_secs() < 60) {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some((_, original)) = name.split_once('.') else { continue };
+        give_back(&e.path(), &dir.join(original));
     }
 }
 
@@ -587,6 +660,7 @@ pub fn spool(repo_root: &std::path::Path, req: &DReq) -> Option<std::path::PathB
 /// where to look.
 fn flush_spool(root: &std::path::Path, session: &str) {
     let dir = root.join(SPOOL_DIR);
+    recover_inflight(&dir);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
     let mut files: Vec<std::path::PathBuf> = entries
         .flatten()
@@ -596,9 +670,11 @@ fn flush_spool(root: &std::path::Path, session: &str) {
     files.sort();
     let repo_root = root.to_string_lossy().to_string();
     for path in files {
-        let Ok(raw) = std::fs::read(&path) else { continue };
+        // Same race as the outbox: whoever moves the file sends it.
+        let Some(taken) = take(&path) else { continue };
+        let Ok(raw) = std::fs::read(&taken) else { continue };
         let Ok(mut req) = serde_json::from_slice::<DReq>(&raw) else {
-            let _ = std::fs::remove_file(&path); // not a request; not ours to keep
+            let _ = std::fs::remove_file(&taken); // not a request; not ours to keep
             continue;
         };
         match &mut req {
@@ -612,19 +688,23 @@ fn flush_spool(root: &std::path::Path, session: &str) {
                 }
             }
             _ => {
-                let _ = std::fs::remove_file(&path); // only these four may be queued
+                let _ = std::fs::remove_file(&taken); // only these four may be queued
                 continue;
             }
         }
         match call_daemon(&req) {
-            None => return, // daemon unreachable from here too; keep for next time
+            None => {
+                give_back(&taken, &path); // daemon unreachable from here too; keep for next time
+                return;
+            }
             Some(DResp::Err { msg }) => {
                 let _ = std::fs::write(path.with_extension("refused.txt"), format!("{msg}\n"));
-                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(&taken);
             }
-            Some(_) => { let _ = std::fs::remove_file(&path); }
+            Some(_) => { let _ = std::fs::remove_file(&taken); }
         }
     }
+    tidy_inflight(&dir);
 }
 
 /// Why the daemon could not be reached, in the words a person or an agent

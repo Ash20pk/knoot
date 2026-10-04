@@ -501,6 +501,90 @@ async fn a_message_left_in_the_outbox_is_sent_on_the_next_hook() {
     assert!(reason.contains("ash"), "from the sender, not the hook:\n{reason}");
 }
 
+/// Codex fires hooks concurrently, and every one of them flushes the outbox.
+/// Live, a message sent once landed on the log three times. Whoever moves
+/// the file sends it; the rest find nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_is_sent_once_however_many_hooks_race_for_it() {
+    let (sock, root, url) = scenario("outbox-race").await;
+    joins(&sock, &root, "cx-ash", "ash");
+    let outbox = root.join(".knoot/outbox");
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::write(outbox.join("all"), "releasing test.js now\n").unwrap();
+
+    let hooks: Vec<_> = (0..8)
+        .map(|_| {
+            let (sock, root) = (sock.clone(), root.clone());
+            std::thread::spawn(move || {
+                hook_as(&sock, bash(&root, "cx-ash", "PostToolUse", "cat README.md"), "ash");
+            })
+        })
+        .collect();
+    for h in hooks {
+        h.join().unwrap();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    assert!(!outbox.join("all").exists(), "the message left the outbox");
+    let base = url.replacen("ws://", "http://", 1);
+    let base = base.trim_end_matches("/ws");
+    let (_, v) = http("GET", &format!("{base}/api/events?repo=codex-outbox-race"), None, None).await;
+    let sent = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "message" && e["text"] == "releasing test.js now")
+        .count();
+    assert_eq!(sent, 1, "one message, sent once:\n{v}");
+}
+
+/// A killed agent never fires `SessionEnd`. Live, one held `test.js` for the
+/// whole ten-minute lease and blocked two peers — one of them the same
+/// person's next session. The daemon watches the process behind each session
+/// and lets the claims go when it is gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dead_agents_claims_are_released_without_waiting_for_the_lease() {
+    let (sock, root, url) = scenario("reap").await;
+    seed(&root, "src/a.rs");
+
+    // The session starts from a process that is not this test: awk runs the
+    // hook (through a shell that execs it, as an agent's hook runner does)
+    // and exits, which is what a killed agent looks like from the daemon.
+    let mut start = envelope(&root, "cx-dead", "SessionStart");
+    start["source"] = json!("startup");
+    let payload = root.join("start.json");
+    std::fs::write(&payload, start.to_string()).unwrap();
+    let script = format!("BEGIN {{ system(\"'{BIN}' hook --agent codex < '{}' > /dev/null\") }}", payload.display());
+    let st = Command::new("awk")
+        .arg(script)
+        .env("KNOOT_SOCK", &sock)
+        .env("KNOOT_USER", "ash")
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    // A later hook from the session — from a live process — takes a file.
+    hook_as(&sock, patch(&root, "cx-dead", "PreToolUse", &update(&["src/a.rs"])), "ash");
+    assert!(relay_holds_claim(&url, "codex-reap", "src/a.rs").await, "the claim was taken");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while relay_holds_claim(&url, "codex-reap", "src/a.rs").await {
+        assert!(std::time::Instant::now() < deadline, "a dead agent still holds src/a.rs after 30s");
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// And the converse: a session whose agent is alive keeps what it holds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_agent_is_not_reaped() {
+    let (sock, root, url) = scenario("alive").await;
+    seed(&root, "src/a.rs");
+    joins(&sock, &root, "cx-live", "ash"); // the hook's parent is this test, alive throughout
+    hook_as(&sock, patch(&root, "cx-live", "PreToolUse", &update(&["src/a.rs"])), "ash");
+    tokio::time::sleep(std::time::Duration::from_secs(12)).await; // past one reap
+    assert!(relay_holds_claim(&url, "codex-alive", "src/a.rs").await, "a live agent keeps its claim");
+}
+
 /// `init` keeps the outbox out of the repository, and does not rewrite a
 /// `.gitignore` that already covers it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
