@@ -30,7 +30,7 @@
 /* ---------- auth ---------- */
 .auth { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
 .auth-panel { padding: 56px clamp(24px, 6vw, 88px); max-width: 620px; }
-.auth-panel .brand { font-size: 19px; font-weight: 600; text-decoration: none; }
+
 .auth-panel h1 { font-variation-settings: 'wdth' 86; font-size: 34px; margin-top: 44px; }
 .auth-sub { color: var(--panel-dim); margin-top: 10px; }
 .auth-panel form { margin-top: 18px; max-width: 400px; }
@@ -53,10 +53,9 @@
   background: var(--panel); border-bottom: 1px solid var(--panel-rule);
 }
 .bar { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 20px; min-width: 0; }
-.topbar .brand {
-  font-size: 17px; font-weight: 700; text-decoration: none; color: var(--green);
-  text-shadow: 0 0 8px rgba(0, 255, 65, .35); flex: none;
-}
+.topbar .brand { flex: none; }
+/* `.app-body a` inherits colour, which would dim the logo to body text. */
+.app-body .brand { color: var(--bright); }
 .crumb-sep { color: var(--panel-rule); font-size: 18px; flex: none; }
 .team-name {
   font-size: 14px; color: var(--panel-text); min-width: 0;

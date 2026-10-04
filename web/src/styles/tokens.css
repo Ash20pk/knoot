@@ -79,7 +79,16 @@ p { margin: 0; }
 /* ---------- nav shared by the light pages ---------- */
 .nav { position: sticky; top: 0; z-index: 20; background: rgba(0, 0, 0, .86); backdrop-filter: blur(6px); border-bottom: 1px solid var(--rule); }
 .nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
-.brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; text-decoration: none; color: var(--bright); }
+/* The logo, the same on every page as on the homepage (.mx-brand): a green
+   prompt, the name in bright phosphor, and a blinking block cursor in headers. */
+.brand { color: var(--bright); font-weight: 800; font-size: 17px; text-shadow: var(--glow); white-space: nowrap; text-decoration: none; }
+.brand:hover { text-shadow: var(--glow); }
+.brand .brand-prompt { color: var(--green); }
+.brand .brand-cursor {
+  display: inline-block; width: .55em; height: 1.05em; margin-left: 3px; vertical-align: -.15em;
+  background: var(--green); box-shadow: var(--glow); animation: brand-caret 1.1s steps(1) infinite;
+}
+@keyframes brand-caret { 50% { opacity: 0; } }
 .nav nav { display: flex; gap: 22px; margin-left: 12px; }
 .nav nav a { text-decoration: none; color: var(--ink-2); font-size: 15px; }
 .nav nav a:hover, .nav nav a[aria-current] { color: var(--ink); }
@@ -143,7 +152,7 @@ footer.site .relay { margin-left: auto; font-family: var(--mono); font-size: 13p
   .nav nav { display: none; }
   .wrap { width: calc(100vw - 32px); }
 }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .brand .brand-cursor { animation: none; } }
 
 /* Scanlines, as on the homepage. */
 body::after {
