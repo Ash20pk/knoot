@@ -135,6 +135,9 @@ jobs:
           check https://knoot.dev/app/ 200
           check https://knoot.dev/status 200
           check https://relay.knoot.dev/api/repos 401
+          check https://knoot.dev/api/health 200
+          curl -s https://knoot.dev/api/health | grep -q '"status":"ok"' \
+            || { echo "::error::/api/health does not report ok"; exit 1; }
           curl -sI https://knoot.dev/app/ | grep -qi '^content-security-policy:' \
             || { echo "::error::/app/ lost its Content-Security-Policy header"; exit 1; }
           echo "knoot.dev is serving ${{ steps.rev.outputs.sha }}"

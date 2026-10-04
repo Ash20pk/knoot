@@ -1,34 +1,70 @@
-.status { padding: 48px 0 90px; }
-.banner { display: flex; align-items: center; gap: 14px; padding-bottom: 22px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
-.banner h1 { font-variation-settings: 'wdth' 86; font-size: clamp(28px, 3.6vw, 40px); line-height: 1.1; }
-.banner .dot { width: 13px; height: 13px; border-radius: 50%; background: var(--ink-3); flex: none; }
-.banner .dot.up { background: var(--held); }
-.banner .dot.down { background: var(--blocked); }
-.banner .dot.part { background: var(--warn); }
-.banner .checked { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--ink-2); }
-.intro { margin-top: 20px; color: var(--ink-2); max-width: 68ch; }
+/* The status page: one state, read from the relay, and the four facts behind
+   it. Colour is the state — green up, amber degraded, red unreachable. */
 
-.checks { margin-top: 34px; }
-.check { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 16px; align-items: baseline;
-  padding: 16px 0; border-top: 1px solid var(--rule); }
-.check:first-child { border-top: 1px solid var(--ink); }
-.check .mark { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-3); align-self: center; }
-.check .mark.up { background: var(--held); }
-.check .mark.down { background: var(--blocked); }
-.check .mark.part { background: var(--warn); }
-.check h3 { font-size: 17px; font-weight: 500; }
-.check p { margin-top: 5px; color: var(--ink-2); font-size: 14.5px; }
-.check .verdict { font-size: 14.5px; }
-.check .verdict.up { color: var(--held); }
-.check .verdict.down { color: var(--blocked); }
-.check .verdict.part { color: #ffd23f; }
-.check .ms { font-family: var(--mono); font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 62px; text-align: right; }
+.status { padding: 72px 0 96px; }
 
-.note { margin-top: 64px; padding-top: 28px; border-top: 1px solid var(--rule); max-width: 68ch; }
-.note h2 { font-variation-settings: 'wdth' 88; font-size: 24px; }
+/* ---------- the state ---------- */
+.state { --tone: var(--ink-3); padding-bottom: 40px; border-bottom: 1px solid var(--rule); }
+.state[data-state="up"] { --tone: var(--held); }
+.state[data-state="degraded"] { --tone: var(--warn); }
+.state[data-state="down"] { --tone: var(--blocked); }
+
+.state .eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.state h1 {
+  margin-top: 18px; display: flex; align-items: center; gap: 22px;
+  font-size: clamp(44px, 8vw, 96px); line-height: 1; letter-spacing: -.05em;
+  color: var(--tone); text-shadow: 0 0 10px color-mix(in srgb, var(--tone) 55%, transparent),
+    0 0 32px color-mix(in srgb, var(--tone) 22%, transparent);
+  transition: color .3s ease;
+}
+.state[data-state="checking"] h1 { color: var(--ink-2); text-shadow: none; }
+.state .line { margin-top: 20px; max-width: 62ch; color: var(--ink-2); font-size: 16.5px; }
+
+.pulse {
+  position: relative; flex: none; width: clamp(14px, 1.6vw, 20px); aspect-ratio: 1; border-radius: 50%;
+  background: var(--tone); box-shadow: 0 0 12px var(--tone);
+}
+.pulse::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--tone);
+  animation: pulse 2.4s ease-out infinite;
+}
+.state[data-state="checking"] .pulse { animation: blink 1s steps(2, jump-none) infinite; box-shadow: none; }
+.state[data-state="checking"] .pulse::after { animation: none; border-color: transparent; }
+@keyframes pulse { from { transform: scale(1); opacity: .8; } to { transform: scale(3.2); opacity: 0; } }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* ---------- the facts behind it ---------- */
+.facts {
+  margin: 0; display: grid; grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--rule);
+}
+.facts > div { padding: 22px 0 24px; }
+.facts > div + div { padding-left: 24px; border-left: 1px solid var(--rule); }
+.facts dt { font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.facts dd {
+  margin: 8px 0 0; font-size: 22px; font-weight: 500; color: var(--bright);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.facts dd[data-ok="false"]:not(:empty) { color: var(--warn); }
+
+.when { margin-top: 16px; font-size: 13.5px; color: var(--ink-3); }
+.again {
+  font: inherit; color: var(--green); background: none; border: 0; padding: 0; cursor: pointer;
+}
+.again:hover { text-shadow: var(--glow); }
+
+/* ---------- what an outage means ---------- */
+.note { margin-top: 72px; max-width: 64ch; }
+.note h2 { font-size: 20px; }
 .note p { margin-top: 14px; color: var(--ink-2); }
-.note code { color: var(--ink); background: var(--paper-2); padding: 1px 5px; border-radius: 3px; }
-@media (max-width: 700px) {
-  .check { grid-template-columns: 20px 1fr; }
-  .check .verdict, .check .ms { grid-column: 2; text-align: left; }
+.note code { background: var(--paper-2); padding: 1px 6px; border-radius: 2px; }
+
+@media (max-width: 760px) {
+  .status { padding-top: 48px; }
+  .facts { grid-template-columns: repeat(2, 1fr); }
+  .facts > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .facts > div:nth-child(n + 3) { border-top: 1px solid var(--rule); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse::after, .state[data-state="checking"] .pulse { animation: none; }
 }

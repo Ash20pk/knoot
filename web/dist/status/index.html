@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>knoot status</title>
-<meta name="description" content="Live status of the knoot relay: websocket, event log, team API and registration.">
+<meta name="description" content="Whether the knoot relay is up, straight from the relay.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/status-CDaIvvsE.js"></script>
+  <script type="module" crossorigin src="/assets/status-BFFblxHr.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-P2Xu9kJm.js">
-  <link rel="modulepreload" crossorigin href="/assets/account-BsuVlu5Z.js">
-  <link rel="stylesheet" crossorigin href="/assets/status-D-LgHFOW.css">
+  <link rel="modulepreload" crossorigin href="/assets/account-CfPUWLCo.js">
+  <link rel="stylesheet" crossorigin href="/assets/status-DRCNUmx8.css">
   <link rel="stylesheet" crossorigin href="/assets/tokens-DwryNyMr.css">
 </head>
 <body>
@@ -33,32 +33,31 @@
 </header>
 
 <main class="status wrap">
-  <div class="banner" id="banner">
-    <span class="dot" id="banner-dot"></span>
-    <h1 id="banner-text">Checking the relay</h1>
-    <span class="checked" id="checked"></span>
-  </div>
+  <section class="state" id="state" data-state="checking" aria-live="polite">
+    <p class="eyebrow">knoot relay · <span id="host"></span></p>
+    <h1><span class="pulse" aria-hidden="true"></span><span id="word">Checking</span></h1>
+    <p class="line" id="line">Asking the relay how it is.</p>
+  </section>
 
-  <p class="intro">
-    These checks run in your browser, against the relay that served this page.
-    They are the same surfaces your agents use, so a failure here is a failure
-    they would see.
-  </p>
+  <dl class="facts" id="facts">
+    <div><dt>Response</dt><dd id="f-ms">—</dd></div>
+    <div><dt>Event log</dt><dd id="f-log">—</dd></div>
+    <div><dt>Uptime</dt><dd id="f-up">—</dd></div>
+    <div><dt>Version</dt><dd id="f-ver">—</dd></div>
+  </dl>
 
-  <section class="checks" id="checks"></section>
+  <p class="when"><span id="checked">not checked yet</span> · <button class="again" id="again" type="button">check now</button></p>
 
   <section class="note">
-    <h2>What an outage means for your agents</h2>
+    <h2>If the relay is down, your agents keep working</h2>
     <p>
-      knoot fails open. If the relay is unreachable, agents are not blocked:
-      every hook resolves to allow and sessions carry on uncoordinated, exactly
-      as they would without knoot installed. You lose collision prevention for
-      the duration, not the ability to work.
+      knoot fails open: every hook resolves to allow and sessions carry on
+      uncoordinated, as they would without knoot. What you lose for the
+      duration is shared memory and collision checks, not the ability to work.
     </p>
     <p>
-      Because of that, silence from an agent proves nothing. Run
-      <code>knoot status</code> on a machine to see whether coordination is
-      actually on.
+      That also means a quiet agent proves nothing. <code>knoot status</code>
+      on a machine says whether coordination is actually on there.
     </p>
   </section>
 </main>

@@ -37,6 +37,8 @@ struct RepoState {
 }
 
 struct App {
+    /// When this relay started, for the uptime `/api/health` reports.
+    started: std::time::Instant,
     repos: Mutex<HashMap<String, RepoState>>,
     db: Mutex<rusqlite::Connection>,
     /// Live agent terminals. Only present when the relay was asked to host a
@@ -235,6 +237,7 @@ async fn prepare_with_token(
         Err(e) => eprintln!("knoot relay: could not migrate old keys ({e}) — they will not resolve"),
     }
     let app = Arc::new(App {
+        started: std::time::Instant::now(),
         repos: Mutex::new(HashMap::new()),
         db: Mutex::new(conn),
         terms: None,
@@ -608,6 +611,7 @@ fn routes(app: Arc<App>) -> Router {
         .route("/lab", get(|| async { page("lab/index.html") }))
         .route("/lab/", get(|| async { page("lab/index.html") }))
         .route("/assets/*path", get(asset_handler))
+        .route("/api/health", get(health_handler))
         .route("/api/terms", get(terms_handler))
         .route("/term/ws/:idx", get(term_ws_handler))
         .route("/api/repos", get(repos_handler))
@@ -712,6 +716,35 @@ fn me(id: &crate::teams::Identity) -> serde_json::Value {
         "device_id": id.token_id,
         "areas": id.areas,
     })
+}
+
+/// Whether this relay is serving, for the status page and anything else that
+/// watches it. Unauthenticated, so it says nothing about teams, repos or who
+/// is connected: that the process answers, that its log answers, its version
+/// and how long it has been up. The log is asked a real question rather than
+/// assumed, because a relay whose database has gone away still answers HTTP.
+async fn health_handler(State(app): State<Arc<App>>) -> axum::response::Response {
+    let db_ok = app
+        .db
+        .lock()
+        .map(|c| c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0)).is_ok())
+        .unwrap_or(false);
+    let code = if db_ok {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        code,
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({
+            "status": if db_ok { "ok" } else { "degraded" },
+            "version": env!("CARGO_PKG_VERSION"),
+            "uptime_s": app.started.elapsed().as_secs(),
+            "log": if db_ok { "ok" } else { "unavailable" },
+        })),
+    )
+        .into_response()
 }
 
 async fn whoami_handler(
@@ -2195,6 +2228,7 @@ mod auth_tests {
         crate::teams::init_schema(&conn).unwrap();
         crate::rooms::init_schema(&conn).unwrap();
         App {
+            started: std::time::Instant::now(),
             repos: Mutex::new(HashMap::new()),
             db: Mutex::new(conn),
             terms: None,
@@ -2204,6 +2238,20 @@ mod auth_tests {
             provider: crate::proto::PROVIDER_PLAINTEXT.into(),
             mls_tx: broadcast::channel(16).0,
         }
+    }
+
+    #[tokio::test]
+    async fn health_answers_without_a_token_and_says_nothing_about_teams() {
+        let app = Arc::new(app_with(Some("sekrit")));
+        let resp = health_handler(State(app)).await;
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 16).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["log"], "ok");
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys.len(), 4, "nothing beyond status, version, uptime and log: {keys:?}");
     }
 
     fn bearer(v: &str) -> axum::http::HeaderMap {

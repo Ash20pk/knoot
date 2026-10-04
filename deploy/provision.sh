@@ -350,6 +350,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7420/api/repos")
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:7420/api/repos")
 [[ $code == 200 ]] && echo "[ok  ] relay accepts the token (200)" \
 	|| fail "tokened /api/repos returned $code"
+health=$(curl -s "http://127.0.0.1:7420/api/health" || true)
+[[ $health == *'"status":"ok"'* ]] && echo "[ok  ] relay reports itself healthy, event log answering" \
+	|| fail "/api/health answered '$health'"
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7420/api/register" -X POST \
 	-H 'Content-Type: application/json' -d '{"team":""}')
 [[ $code == 400 ]] && echo "[ok  ] registration validates its input (400 on empty)" \
