@@ -29,6 +29,10 @@
         <span id="password-label">Password</span>
         <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters">
       </label>
+      <label class="field" id="code-field" hidden>
+        <span>Code from your email</span>
+        <input id="auth-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6-digit code">
+      </label>
       <label class="field" id="team-field" hidden>
         <span>Team name</span>
         <input id="auth-team" maxlength="60" placeholder="Platform team">
@@ -41,6 +45,7 @@
     <div class="auth-alt" id="auth-alt">
       <button type="button" class="linkish" id="auth-switch">Create an account</button>
       <button type="button" class="linkish" id="auth-reset">Forgot password</button>
+      <button type="button" class="linkish" id="auth-resend" hidden>Send a new code</button>
     </div>
     <p class="auth-foot">Agents keep authenticating with tokens. This account is for people.</p>
   </div>

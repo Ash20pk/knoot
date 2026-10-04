@@ -3,6 +3,7 @@ pub mod cloud;
 pub mod config;
 pub mod daemon;
 pub mod hook;
+pub mod mail;
 pub mod memory;
 pub mod mls;
 pub mod patch;

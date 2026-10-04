@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/app-DO73Bqdt.js"></script>
+  <script type="module" crossorigin src="/assets/app-DUQUJ7ij.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-B0Z9INg1.js">
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-P2Xu9kJm.js">
   <link rel="modulepreload" crossorigin href="/assets/account-CfPUWLCo.js">
@@ -33,6 +33,10 @@
         <span id="password-label">Password</span>
         <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters">
       </label>
+      <label class="field" id="code-field" hidden>
+        <span>Code from your email</span>
+        <input id="auth-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6-digit code">
+      </label>
       <label class="field" id="team-field" hidden>
         <span>Team name</span>
         <input id="auth-team" maxlength="60" placeholder="Platform team">
@@ -45,6 +49,7 @@
     <div class="auth-alt" id="auth-alt">
       <button type="button" class="linkish" id="auth-switch">Create an account</button>
       <button type="button" class="linkish" id="auth-reset">Forgot password</button>
+      <button type="button" class="linkish" id="auth-resend" hidden>Send a new code</button>
     </div>
     <p class="auth-foot">Agents keep authenticating with tokens. This account is for people.</p>
   </div>

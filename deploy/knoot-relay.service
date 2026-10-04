@@ -15,6 +15,8 @@ EnvironmentFile=/etc/knoot/relay.env
 # Optional — without it the relay runs exactly as before and agent tokens are
 # the only credential, so the file is not required to exist.
 EnvironmentFile=-/etc/knoot/neon.env
+# Invitation and welcome email. Optional: without it the relay sends none.
+EnvironmentFile=-/etc/knoot/mail.env
 ExecStart=/usr/local/bin/knoot relay --listen 127.0.0.1:7420 --db /var/lib/knoot/relay.db
 Restart=always
 RestartSec=2

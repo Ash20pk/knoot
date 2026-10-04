@@ -81,6 +81,28 @@ export async function setNewPassword(token: string, newPassword: string): Promis
   if (error) throw used;
 }
 
+/**
+ * Email a sign-up confirmation code to `email`. The project requires one before
+ * an account can sign in, and the code expires after fifteen minutes.
+ */
+export async function sendEmailCode(email: string): Promise<void> {
+  const ba = requireClient().auth.getBetterAuthInstance();
+  const { error } = await ba.emailOtp
+    .sendVerificationOtp({ email, type: 'email-verification' })
+    .catch((e: { message?: string }) => ({ error: e }));
+  if (error) throw new Error(error.message ?? 'A code could not be sent. Try again in a minute.');
+}
+
+/** Confirm an address with the code that was emailed to it. */
+export async function verifyEmailCode(email: string, otp: string): Promise<void> {
+  const ba = requireClient().auth.getBetterAuthInstance();
+  const wrong = new Error('That code is not right, or it has expired. Send a new one.');
+  const { error } = await ba.emailOtp
+    .verifyEmail({ email, otp: otp.trim() })
+    .catch(() => ({ error: wrong }));
+  if (error) throw wrong;
+}
+
 /** Change the password of the signed-in person. Needs the current one. */
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   const ba = requireClient().auth.getBetterAuthInstance();

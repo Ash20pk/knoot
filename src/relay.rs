@@ -53,6 +53,12 @@ struct App {
     /// so nothing that still holds it is cut off mid-rotation. Every use is
     /// logged, which is how an operator finds what has not moved yet.
     previous_token: Option<String>,
+    /// Sends invitations and welcomes. `None` without a mail provider, and
+    /// then the console hands the admin a link instead.
+    mailer: Option<Arc<crate::mail::Mailer>>,
+    /// Invitation emails per team per hour: enough for any real onboarding,
+    /// and a ceiling on what a compromised admin account can send.
+    mail_limit: crate::teams::RateLimit,
     /// Open registration needs a brake. Five teams per hour per address is
     /// generous for a human and useless for a script.
     reg_limit: crate::teams::RateLimit,
@@ -229,6 +235,7 @@ async fn prepare_with_token(
     crate::rooms::init_schema(&conn)?;
     crate::memory::init_schema(&conn)?;
     crate::mls::init_schema(&conn)?;
+    init_mail_schema(&conn)?;
     // Every start, not once: a relay can be downgraded and upgraded again, and
     // the migration is keyed on `token_hash`, so running it is free when there
     // is nothing to bring forward.
@@ -247,6 +254,8 @@ async fn prepare_with_token(
         terms: None,
         token,
         previous_token: crate::config::env_or_legacy("KNOOT_RELAY_TOKEN_PREVIOUS"),
+        mailer: crate::mail::Mailer::from_env().map(Arc::new),
+        mail_limit: crate::teams::RateLimit::new(30, 60 * 60 * 1000),
         reg_limit: crate::teams::RateLimit::new(5, 60 * 60 * 1000),
         cloud: crate::cloud::Cloud::from_env(),
         provider: key_provider_name(),
@@ -352,6 +361,10 @@ pub async fn run(listen: String, db_path: PathBuf, lab: Option<LabOpts>) -> Resu
     let router = routes(app);
     let shown = listen.replace("0.0.0.0", "127.0.0.1");
     eprintln!("knoot relay listening on ws://{listen}/ws (audit log: {})", db_path.display());
+    eprintln!(
+        "  mail:      {}",
+        if crate::mail::Mailer::from_env().is_some() { "on (invitations and welcomes)" } else { "off (no RESEND_API_KEY / KNOOT_MAIL_FROM / KNOOT_PUBLIC_URL)" }
+    );
     match relay_token() {
         Some(_) => {
             eprintln!("  auth:      token required (KNOOT_RELAY_TOKEN)");
@@ -630,6 +643,8 @@ fn routes(app: Arc<App>) -> Router {
         .route("/lab/", get(|| async { page("lab/index.html") }))
         .route("/assets/*path", get(asset_handler))
         .route("/api/health", get(health_handler))
+        .route("/api/mail/invite", axum::routing::post(mail_invite_handler))
+        .route("/api/mail/welcome", axum::routing::post(mail_welcome_handler))
         .route("/api/terms", get(terms_handler))
         .route("/term/ws/:idx", get(term_ws_handler))
         .route("/api/repos", get(repos_handler))
@@ -767,6 +782,147 @@ async fn health_handler(State(app): State<Arc<App>>) -> axum::response::Response
         })),
     )
         .into_response()
+}
+
+/// Which mail has gone to whom, so a welcome is sent once per person however
+/// many times the console asks.
+fn init_mail_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mail_log (
+            kind TEXT NOT NULL, key TEXT NOT NULL, ts INTEGER NOT NULL,
+            PRIMARY KEY (kind, key)
+        );",
+    )
+}
+
+#[derive(serde::Deserialize)]
+struct MailInviteBody {
+    email: String,
+    /// The invitation's secret, as `invite_member` returned it to the browser.
+    token: String,
+}
+
+fn mail_off() -> axum::response::Response {
+    (
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({ "error": "this relay does not send mail", "mail": false })),
+    )
+        .into_response()
+}
+
+/// Email an invitation the caller's team has just issued.
+///
+/// Admins only, and only for an invitation that exists: the relay asks the
+/// Data API, as the admin, for that address's live invitation and checks the
+/// secret against its hash. The message and the link are built here from the
+/// relay's own public URL, so nothing the browser sends ends up in the email
+/// except an address that already has a real invitation.
+async fn mail_invite_handler(
+    State(app): State<Arc<App>>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+    Json(body): Json<MailInviteBody>,
+) -> axum::response::Response {
+    let Some(mailer) = app.mailer.clone() else { return mail_off() };
+    let Some(cloud) = app.cloud.clone() else { return mail_off() };
+    let Some(id) = identify(&app, &headers, uri.query()).await else {
+        return unauthorized();
+    };
+    if env_identity(&id) || !id.token_id.is_empty() {
+        // A device key is a machine; inviting people is done signed in.
+        return forbidden("send an invitation from a device key");
+    }
+    if !admin(&id) {
+        return forbidden("send an invitation");
+    }
+    if !app.mail_limit.check(&id.team_id) {
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({ "error": "too many invitations from this team in the last hour" })),
+        )
+            .into_response();
+    }
+    let Some(jwt) = presented(&headers, uri.query()) else { return unauthorized() };
+    let email = body.email.trim().to_lowercase();
+    let Some(role) = cloud.invite_matches(&jwt, &id.team_id, &email, &body.token).await else {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "no live invitation for that address with that secret" })),
+        )
+            .into_response();
+    };
+    let link = format!("{}/app/#join={}", mailer.public_url, body.token);
+    let msg = crate::mail::invite_email(&email, &id.team_name, &id.member.email, &role, &link);
+    // Keyed by the invitation itself, so a double click is one email.
+    let key = format!("invite:{}", &crate::teams::hash_token(&body.token)[..32]);
+    match mailer.send(&msg, &key).await {
+        Ok(_) => Json(serde_json::json!({ "sent": true, "to": email })).into_response(),
+        Err(e) => {
+            eprintln!("knoot relay: invitation to {email} not sent: {e}");
+            (
+                axum::http::StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "the invitation could not be emailed; send the link yourself" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// The welcome email, once per person, to their own verified address.
+///
+/// The console calls this after someone creates or joins a team. It takes no
+/// input: the address and the team come from the signed-in identity, and the
+/// relay's own record makes every call after the first a no-op.
+async fn mail_welcome_handler(
+    State(app): State<Arc<App>>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+) -> axum::response::Response {
+    let Some(mailer) = app.mailer.clone() else { return mail_off() };
+    let Some(id) = identify(&app, &headers, uri.query()).await else {
+        return unauthorized();
+    };
+    if env_identity(&id) || !id.token_id.is_empty() || !id.member.email.contains('@') {
+        return forbidden("receive a welcome from a device key");
+    }
+    match send_welcome_once(&app, &mailer, &id.member.id, &id.member.email, &id.team_name).await {
+        Ok(sent) => Json(serde_json::json!({ "sent": sent })).into_response(),
+        Err(e) => {
+            eprintln!("knoot relay: welcome to {} not sent: {e}", id.member.email);
+            (axum::http::StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": "not sent" }))).into_response()
+        }
+    }
+}
+
+/// `Ok(true)` when this call sent it, `Ok(false)` when it had gone before.
+/// The record is written first and taken back if sending fails, so two
+/// concurrent calls cannot both send and a failure can be retried.
+async fn send_welcome_once(
+    app: &App,
+    mailer: &crate::mail::Mailer,
+    member_id: &str,
+    email: &str,
+    team: &str,
+) -> Result<bool, String> {
+    let fresh = {
+        let db = app.db.lock().unwrap();
+        db.execute(
+            "INSERT OR IGNORE INTO mail_log (kind, key, ts) VALUES ('welcome', ?1, ?2)",
+            rusqlite::params![member_id, crate::proto::now_ms() as i64],
+        )
+        .map_err(|e| e.to_string())?
+            == 1
+    };
+    if !fresh {
+        return Ok(false);
+    }
+    let msg = crate::mail::welcome_email(email, team, &mailer.public_url);
+    if let Err(e) = mailer.send(&msg, &format!("welcome:{member_id}")).await {
+        let db = app.db.lock().unwrap();
+        let _ = db.execute("DELETE FROM mail_log WHERE kind = 'welcome' AND key = ?1", [member_id]);
+        return Err(e);
+    }
+    Ok(true)
 }
 
 async fn whoami_handler(
@@ -2256,6 +2412,8 @@ mod auth_tests {
             terms: None,
             token: token.map(str::to_string),
             previous_token: None,
+            mailer: None,
+            mail_limit: crate::teams::RateLimit::new(30, 60_000),
             reg_limit: crate::teams::RateLimit::new(5, 60_000),
             cloud: None,
             provider: crate::proto::PROVIDER_PLAINTEXT.into(),
@@ -2276,6 +2434,38 @@ mod auth_tests {
         );
         assert!(team_of(&app, &bearer("Bearer new-secret"), None).await.is_some(), "and the new one too");
         assert!(team_of(&app, &bearer("Bearer guess"), None).await.is_none(), "but nothing else");
+    }
+
+    #[tokio::test]
+    async fn a_welcome_is_sent_once_and_retried_after_a_failure() {
+        use axum::{routing::post, Json, Router};
+        let app = app_with(None);
+        init_mail_schema(&app.db.lock().unwrap()).unwrap();
+        // A provider that fails the first send and accepts the rest.
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c2 = calls.clone();
+        let fake = Router::new().route(
+            "/emails",
+            post(move || {
+                let n = c2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    if n == 0 {
+                        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"message": "down"}))).into_response()
+                    } else {
+                        Json(serde_json::json!({"id": "em_1"})).into_response()
+                    }
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, fake).await.unwrap() });
+        let mailer = crate::mail::Mailer::new("re_x", "knoot <hello@knoot.dev>", &url, "https://knoot.dev");
+
+        assert!(send_welcome_once(&app, &mailer, "m_1", "ash@acme.test", "acme").await.is_err(), "the provider failed");
+        assert_eq!(send_welcome_once(&app, &mailer, "m_1", "ash@acme.test", "acme").await, Ok(true), "so the next call sends it");
+        assert_eq!(send_welcome_once(&app, &mailer, "m_1", "ash@acme.test", "acme").await, Ok(false), "and none after that");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2, "two attempts reached the provider, not three");
     }
 
     #[tokio::test]

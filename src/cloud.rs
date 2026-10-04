@@ -293,6 +293,42 @@ impl Cloud {
     }
 }
 
+impl Cloud {
+    /// Whether `secret` is the live invitation for `email` in `team_id`, asked
+    /// of the Data API as the person holding `access_token`. Row-level
+    /// security lets a team read its own invitations' hashes and nothing
+    /// else, so this proves both that the invitation exists and that the
+    /// caller's team issued it — before the relay emails anybody. Returns the
+    /// invitation's role when it matches.
+    pub async fn invite_matches(&self, access_token: &str, team_id: &str, email: &str, secret: &str) -> Option<String> {
+        use sha2::{Digest, Sha256};
+        let enc = |s: &str| s.replace('%', "%25").replace('&', "%26").replace('+', "%2B").replace(',', "%2C");
+        let Ok(resp) = self
+            .http
+            .get(format!(
+                "{}/invites?team_id=eq.{}&email=eq.{}&accepted_at=is.null&select=token_hash,role&limit=1",
+                self.data_api_url,
+                enc(team_id),
+                enc(&email.trim().to_lowercase())
+            ))
+            .bearer_auth(access_token)
+            .send()
+            .await
+        else {
+            return None;
+        };
+        if !resp.status().is_success() {
+            return None;
+        }
+        let rows = resp.json::<serde_json::Value>().await.ok()?;
+        let row = rows.as_array().and_then(|r| r.first())?;
+        let want = row.get("token_hash").and_then(|h| h.as_str()).unwrap_or_default();
+        let got = format!("{:x}", Sha256::digest(secret.as_bytes()));
+        (!want.is_empty() && want == got)
+            .then(|| row.get("role").and_then(|r| r.as_str()).unwrap_or("member").to_string())
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct Claims {
     sub: String,
@@ -328,6 +364,50 @@ mod tests {
     use super::*;
     use axum::response::IntoResponse;
     use ed25519_dalek::{Signer, SigningKey};
+
+    /// A Data API that holds one invitation, and answers only the bearer it
+    /// was given — as row-level security would for another team.
+    async fn invites_api(hash: String) -> String {
+        use axum::{extract::Query, routing::get, Json, Router};
+        let app = Router::new().route(
+            "/neondb/rest/v1/invites",
+            get(move |headers: axum::http::HeaderMap, Query(q): Query<std::collections::HashMap<String, String>>| {
+                let hash = hash.clone();
+                async move {
+                    let ours = headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer admin-jwt");
+                    let row = q.get("team_id").map(String::as_str) == Some("eq.t1")
+                        && q.get("email").map(String::as_str) == Some("eq.priya@acme.test")
+                        && q.get("accepted_at").map(String::as_str) == Some("is.null");
+                    let rows = if ours && row {
+                        serde_json::json!([{ "token_hash": hash, "role": "admin" }])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    Json(rows).into_response()
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn an_invitation_is_emailed_only_when_its_secret_matches_a_live_one() {
+        use sha2::{Digest, Sha256};
+        let secret = "kni_0123456789abcdef";
+        let url = invites_api(format!("{:x}", Sha256::digest(secret.as_bytes()))).await;
+        let cloud = Cloud::for_test(&url);
+        assert_eq!(
+            cloud.invite_matches("admin-jwt", "t1", "Priya@Acme.test ", secret).await.as_deref(),
+            Some("admin"),
+            "the real secret, any case or spacing of the address: yes, with its role"
+        );
+        assert!(cloud.invite_matches("admin-jwt", "t1", "priya@acme.test", "kni_guess").await.is_none(), "a wrong secret: no");
+        assert!(cloud.invite_matches("admin-jwt", "t1", "sam@acme.test", secret).await.is_none(), "another address: no");
+        assert!(cloud.invite_matches("other-jwt", "t1", "priya@acme.test", secret).await.is_none(), "another team's view: no");
+    }
 
     const KID: &str = "test-key";
     const USER: &str = "23406640-82dc-4cea-ad63-650fef648f8f";

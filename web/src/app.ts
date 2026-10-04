@@ -3,7 +3,8 @@ import { api, type TeamPayload, type RelayEvent, type RelayMember, type Area, ty
 import { LiveRepo, EVENT_CLASS, eventDetail, ago } from './lib/live';
 import {
   configured, neon, loadTeam, createTeam, inviteMember, listInvites, revokeInvite,
-  acceptInvite, removeTeamMember, setNewPassword, changePassword, type Team, type Invite,
+  acceptInvite, removeTeamMember, setNewPassword, changePassword, sendEmailCode, verifyEmailCode,
+  type Team, type Invite,
 } from './lib/neon';
 import { rememberSignedIn, forgetSignedIn } from './lib/account';
 
@@ -67,26 +68,42 @@ const resetToken = landing.get('token');
 const resetFailed = landing.has('error');
 if (resetToken || resetFailed) history.replaceState(null, '', location.pathname + location.hash);
 
-type Mode = 'signin' | 'signup' | 'recover';
+type Mode = 'signin' | 'signup' | 'recover' | 'verify';
+
+// Between signing up and entering the emailed code. The password is held only
+// here, in memory, to sign in once the address is confirmed.
+let pending: { email: string; password: string } | null = null;
+// Set when this session made or joined a team, so the welcome goes out once.
+let joinedNow = false;
 let mode: Mode = resetToken ? 'recover'
   : location.hash === '#signup' ? 'signup' : 'signin';
 
 function paintAuthMode(): void {
   const signup = mode === 'signup';
   const recover = mode === 'recover';
-  $('#auth-title')!.textContent = recover ? 'Choose a new password' : signup ? 'Create your account' : 'Sign in';
-  $('#auth-sub')!.textContent = recover
-    ? 'You followed a reset link. Set the password you will sign in with from now on.'
-    : signup
-      ? 'A team, an agent token, and a live log of every session. No card needed.'
-      : 'Manage your team, agent tokens and live sessions.';
-  $('#auth-go')!.textContent = recover ? 'Set password' : signup ? 'Create account' : 'Sign in';
-  $('#auth-switch')!.textContent = signup ? 'I already have an account' : 'Create an account';
+  const verify = mode === 'verify';
+  $('#auth-title')!.textContent = verify ? 'Check your email' : recover ? 'Choose a new password' : signup ? 'Create your account' : 'Sign in';
+  $('#auth-sub')!.textContent = verify
+    ? `We sent a code to ${pending?.email ?? 'your address'}. Enter it to confirm the address and finish signing in.`
+    : recover
+      ? 'You followed a reset link. Set the password you will sign in with from now on.'
+      : signup
+        ? 'A team, an agent token, and a live log of every session. No card needed.'
+        : 'Manage your team, agent tokens and live sessions.';
+  $('#auth-go')!.textContent = verify ? 'Confirm and continue' : recover ? 'Set password' : signup ? 'Create account' : 'Sign in';
+  $('#auth-switch')!.textContent = verify ? 'Use a different address' : signup ? 'I already have an account' : 'Create an account';
   $('#password-label')!.textContent = recover ? 'New password' : 'Password';
-  ($('#email-field') as HTMLElement).hidden = recover;
-  ($('#auth-email') as HTMLInputElement).required = !recover;
+  ($('#email-field') as HTMLElement).hidden = recover || verify;
+  ($('#auth-email') as HTMLInputElement).required = !recover && !verify;
+  (($('#auth-password') as HTMLInputElement).closest('label') as HTMLElement).hidden = verify;
+  ($('#auth-password') as HTMLInputElement).required = !verify;
+  ($('#code-field') as HTMLElement).hidden = !verify;
+  ($('#auth-code') as HTMLInputElement).required = verify;
+  ($('#auth-resend') as HTMLElement).hidden = !verify;
+  ($('#auth-reset') as HTMLElement).hidden = verify;
   ($('#auth-alt') as HTMLElement).hidden = recover;
   ($('#team-field') as HTMLElement).hidden = !signup;
+  if (verify) ($('#auth-code') as HTMLInputElement).focus();
   ($('#auth-team') as HTMLInputElement).required = signup;
   ($('#auth-password') as HTMLInputElement).autocomplete = signup || recover ? 'new-password' : 'current-password';
 }
@@ -112,11 +129,31 @@ function showAuth(): void {
 }
 
 $('#auth-switch')!.addEventListener('click', () => {
-  mode = mode === 'signup' ? 'signin' : 'signup';
+  if (mode === 'verify') pending = null;
+  mode = mode === 'signup' || mode === 'verify' ? 'signin' : 'signup';
   location.hash = mode === 'signup' ? '#signup' : '';
   authMessage('clear');
   paintAuthMode();
 });
+
+$('#auth-resend')!.addEventListener('click', async () => {
+  if (!pending) return;
+  try {
+    await sendEmailCode(pending.email);
+    authMessage('ok', `A new code is on its way to ${pending.email}.`);
+  } catch (e) {
+    authMessage('err', (e as Error).message);
+  }
+});
+
+/** Move to the code step for this address, holding the password to sign in after. */
+function askForCode(email: string, password: string, note: string): void {
+  pending = { email, password };
+  mode = 'verify';
+  ($('#auth-code') as HTMLInputElement).value = '';
+  paintAuthMode();
+  authMessage('ok', note);
+}
 
 $('#auth-reset')!.addEventListener('click', async () => {
   const email = ($('#auth-email') as HTMLInputElement).value.trim();
@@ -143,6 +180,16 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
   btn.textContent = mode === 'signup' ? 'Creating account' : 'Signing in';
   try {
     const sb = neon!;
+    if (mode === 'verify' && pending) {
+      btn.textContent = 'Confirming';
+      await verifyEmailCode(pending.email, ($('#auth-code') as HTMLInputElement).value);
+      const { error } = await sb.auth.signInWithPassword({ email: pending.email, password: pending.password });
+      if (error) throw new Error(error.message);
+      pending = null;
+      mode = 'signin';
+      await boot();
+      return;
+    }
     if (mode === 'recover') {
       await setNewPassword(resetToken!, password);
       mode = 'signin';
@@ -169,18 +216,27 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
       }
       rememberTeamName(teamName);
       if (!data.session) {
-        // The project requires email confirmation, so there is no session to
-        // create a team with yet. It is made on first sign-in instead.
-        authMessage('ok', `Check ${email} to confirm your address, then sign in. Your team is created when you first sign in.`);
-        mode = 'signin';
-        paintAuthMode();
+        // The project requires a confirmed address, so there is no session to
+        // create a team with yet: the code step signs in, and the team is
+        // made on that first sign-in.
+        askForCode(email, password, `We sent a 6-digit code to ${email}. It expires in fifteen minutes.`);
         return;
       }
       await createTeam(teamName || `${email.split('@')[0]}'s team`);
       takeTeamName();
+      joinedNow = true;
     } else {
       const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // An account made before its address was confirmed: send a fresh code
+        // and finish here rather than telling them to go and find an email.
+        if (/not verified|verify your email|email_not_verified/i.test(error.message)) {
+          await sendEmailCode(email);
+          askForCode(email, password, `${email} is not confirmed yet. We sent a new code.`);
+          return;
+        }
+        throw new Error(error.message);
+      }
     }
     await boot();
   } catch (e) {
@@ -1103,7 +1159,7 @@ async function viewTeam(): Promise<void> {
       ${canAdmin && configured ? `<div class="panel">
         <div class="panel-head"><h2>Invite a teammate</h2></div>
         <div class="panel-body">
-          <p>An invitation is to a person, not a link anyone can use: it only works for the address it was sent to, and it lapses after seven days. Nothing is emailed from here, send them the link yourself.</p>
+          <p>An invitation is to a person, not a link anyone can use: it only works for the address it was sent to, and it lapses after seven days. If this relay sends mail it is emailed to them, and either way you get the link to pass on.</p>
           ${sealedNote}
           <div class="inline-form" style="margin-top:14px">
             <input id="inv-email" type="email" placeholder="their@email.com">
@@ -1270,8 +1326,21 @@ async function viewTeam(): Promise<void> {
     try {
       const secret = await inviteMember(email, inviteRole);
       const link = `${location.origin}/app/#join=${secret}`;
+      // The relay emails it when it has a mail provider, checking first that
+      // this is a real invitation from this team. Without one, or if sending
+      // fails, the link below is the invitation, as it always was.
+      let emailed = '';
+      try {
+        await api('/api/mail/invite', { method: 'POST', body: JSON.stringify({ email, token: secret }) });
+        emailed = `Invitation emailed to ${email}. The link works too, and is readable only now.`;
+      } catch (mailErr) {
+        const why = (mailErr as Error).message;
+        emailed = /does not send mail/i.test(why)
+          ? `Send ${email} this link. It is readable only now.`
+          : `The email could not be sent (${why}). Send ${email} this link yourself; it is readable only now.`;
+      }
       $('#inv-out')!.innerHTML = `<div class="reveal">
-          <div class="lbl">Send ${esc(email)} this link. It is readable only now.</div>
+          <div class="lbl">${esc(emailed)}</div>
           <div class="val">${esc(link)}</div>
         </div>
         <div class="cmd-row"><code>${esc(link)}</code><button class="copy" type="button">Copy</button></div>`;
@@ -1402,6 +1471,7 @@ async function boot(): Promise<void> {
       try {
         await acceptInvite(invite);
         found = await loadTeam();
+        joinedNow = true;
       } catch (e) {
         bootEl.textContent = `That invitation could not be used: ${(e as Error).message}`;
         return;
@@ -1413,11 +1483,18 @@ async function boot(): Promise<void> {
       const email = data.session.user.email ?? 'your';
       team = await createTeam(takeTeamName() || `${email.split('@')[0]}'s team`);
       role = 'owner';
+      joinedNow = true;
     } else {
       team = found.team;
       role = found.role;
     }
     await refreshRelayTeam();
+    if (joinedNow) {
+      joinedNow = false;
+      // Once per person, enforced by the relay; a relay with no mail set up
+      // answers that it sends none, and that is fine.
+      void api('/api/mail/welcome', { method: 'POST' }).catch(() => undefined);
+    }
   } catch (e) {
     bootEl.textContent = `Could not load your console: ${(e as Error).message}`;
     return;
