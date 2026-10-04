@@ -31,7 +31,10 @@ STATE=/var/lib/knoot
 DEPLOY_DIR=/root/deploy
 MAX_BYTES=$((64 * 1024 * 1024))
 KEEP_SNAPSHOTS=5
-ALLOWED='^(REVISION|knoot-x86_64-linux|knoot-x86_64-linux\.sha256|deploy/|deploy/(provision\.sh|receive\.sh|rotate-token\.sh|Caddyfile|knoot-relay\.service))$'
+# Any plain file name under deploy/ — letters, digits, dot, dash, underscore,
+# not starting with a dot, no further slashes — so adding a deploy file does
+# not need the receiver on the box updated by hand first. Nothing else.
+ALLOWED='^(REVISION|knoot-x86_64-linux|knoot-x86_64-linux\.sha256|deploy/|deploy/[A-Za-z0-9][A-Za-z0-9._-]*)$'
 
 [[ $EUID -eq 0 ]] || { echo "knoot-receive: must run as root (through sudo)" >&2; exit 1; }
 say() { printf '\n== %s\n' "$*"; }
@@ -98,11 +101,10 @@ deploy() {
 	# here, which is how the last relay's unit outlived its rename.
 	rm -rf "${DEPLOY_DIR:?}"
 	install -d -m 0755 "$DEPLOY_DIR"
-	install -m 0755 "$work/b/deploy/provision.sh" "$work/b/deploy/receive.sh" "$DEPLOY_DIR/"
-	if [[ -f "$work/b/deploy/rotate-token.sh" ]]; then
-		install -m 0755 "$work/b/deploy/rotate-token.sh" "$DEPLOY_DIR/"
-	fi
-	install -m 0644 "$work/b/deploy/Caddyfile" "$work/b/deploy/knoot-relay.service" "$DEPLOY_DIR/"
+	for f in "$work"/b/deploy/*; do
+		[[ -f $f ]] || continue
+		if [[ $f == *.sh ]]; then install -m 0755 "$f" "$DEPLOY_DIR/"; else install -m 0644 "$f" "$DEPLOY_DIR/"; fi
+	done
 
 	say "provision ${rev:0:7}"
 	if SOURCE=file BINARY="$work/b/knoot-x86_64-linux" bash "$DEPLOY_DIR/provision.sh"; then
