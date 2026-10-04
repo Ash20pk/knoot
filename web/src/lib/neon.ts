@@ -110,12 +110,24 @@ export async function loadTeam(): Promise<{ team: Team; role: Member['role'] } |
   return { team, role: (data as unknown as { role: Member['role'] }).role };
 }
 
-/** Called once after sign-up: makes the team and the owner row in one step. */
+/**
+ * Called once after sign-up: makes the team and the owner row in one step.
+ *
+ * The first Data API call after the Neon compute has scaled to zero can reach
+ * Postgres without the JWT's claims applied, so `auth.uid()` is null and the
+ * function refuses with "not signed in" though the request carried a valid
+ * token. Sign-up is exactly that first call on a quiet project. The same call
+ * a moment later succeeds, so that one refusal is retried.
+ */
 export async function createTeam(name: string): Promise<Team> {
   const sb = requireClient();
-  const { data, error } = await sb.rpc('create_team', { team_name: name });
-  if (error) throw new Error(error.message);
-  return data as Team;
+  for (const wait of [0, 500, 1000, 2000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    const { data, error } = await sb.rpc('create_team', { team_name: name });
+    if (!error) return data as Team;
+    if (error.message !== 'not signed in') throw new Error(error.message);
+  }
+  throw new Error('Your account was created, but the team could not be. Reload this page to finish.');
 }
 
 export type Invite = {
