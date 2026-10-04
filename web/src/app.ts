@@ -302,11 +302,19 @@ function route(): Route {
   return connected() ? 'sessions' : 'start';
 }
 
+/** Team, agent keys and rooms are administration, so they sit under Settings. */
+const SETTINGS_ROUTES: readonly Route[] = ['settings', 'team', 'tokens', 'rooms'];
+
 function paintTabs(): void {
   const r = route();
+  const inSettings = SETTINGS_ROUTES.includes(r);
   for (const a of document.querySelectorAll<HTMLAnchorElement>('.tabs a')) {
-    const on = a.getAttribute('href') === `#${r}`;
-    a.classList.toggle('on', on);
+    const href = a.getAttribute('href');
+    a.classList.toggle('on', href === `#${r}` || (inSettings && href === '#settings'));
+  }
+  ($('#subtabs') as HTMLElement).hidden = !inSettings;
+  for (const a of document.querySelectorAll<HTMLAnchorElement>('.subtabs a')) {
+    a.classList.toggle('on', a.getAttribute('href') === `#${r}`);
   }
   // On a phone the row scrolls sideways; keep the section you are in on screen.
   const tabs = $('#tabs') as HTMLElement;
@@ -1373,7 +1381,7 @@ async function viewTeam(): Promise<void> {
 function viewSettings(): void {
   viewEl.innerHTML = `
     <div class="page">
-      <div class="page-head"><div><h1>Settings</h1><p>Account and relay details.</p></div></div>
+      <div class="page-head"><div><h1>General</h1><p>Account and relay details.</p></div></div>
       <div class="panel">
         <div class="panel-head"><h2>Relay</h2></div>
         <div class="panel-body">

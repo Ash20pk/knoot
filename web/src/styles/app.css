@@ -112,12 +112,27 @@
 .tabs a.on { color: var(--green); border-bottom-color: var(--green); text-shadow: 0 0 8px rgba(0, 255, 65, .35); }
 .tab-sep { flex: none; width: 1px; margin: 12px 8px; background: var(--panel-rule); }
 
+/* Settings' own sections, one row under the tabs. */
+.subtabs {
+  display: flex; gap: 2px; padding: 0 12px; height: 36px; border-top: 1px solid var(--panel-rule);
+  overflow-x: auto; scrollbar-width: none;
+}
+.subtabs[hidden] { display: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtabs a {
+  display: flex; align-items: center; text-decoration: none; white-space: nowrap;
+  color: var(--panel-dim); font-size: 13px; padding: 0 10px;
+}
+.subtabs a:hover { color: var(--panel-text); }
+.subtabs a.on { color: var(--green); }
+.subtabs a.on::before { content: '> '; white-space: pre; }
+
 @media (max-width: 760px) {
   .bar { padding: 0 14px; }
   .toplink { display: none; }
   .account-btn { padding: 4px; }
   .account-btn .who, .caret { display: none; }
-  .tabs { padding: 0 6px; }
+  .tabs, .subtabs { padding: 0 6px; }
 }
 
 /* ---------- page furniture ---------- */
