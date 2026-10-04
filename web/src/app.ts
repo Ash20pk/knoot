@@ -80,6 +80,9 @@ let mode: Mode = resetToken ? 'recover'
 
 function paintAuthMode(): void {
   const signup = mode === 'signup';
+  // Someone who followed an invitation joins that team; a team name asked of
+  // them would be thrown away.
+  const invited = signup && invitePending();
   const recover = mode === 'recover';
   const verify = mode === 'verify';
   $('#auth-title')!.textContent = verify ? 'Check your email' : recover ? 'Choose a new password' : signup ? 'Create your account' : 'Sign in';
@@ -87,7 +90,9 @@ function paintAuthMode(): void {
     ? `We sent a code to ${pending?.email ?? 'your address'}. Enter it to confirm the address and finish signing in.`
     : recover
       ? 'You followed a reset link. Set the password you will sign in with from now on.'
-      : signup
+      : invited
+        ? 'Create an account to join the team that invited you.'
+        : signup
         ? 'A team, an agent token, and a live log of every session. No card needed.'
         : 'Manage your team, agent tokens and live sessions.';
   $('#auth-go')!.textContent = verify ? 'Confirm and continue' : recover ? 'Set password' : signup ? 'Create account' : 'Sign in';
@@ -102,9 +107,9 @@ function paintAuthMode(): void {
   ($('#auth-resend') as HTMLElement).hidden = !verify;
   ($('#auth-reset') as HTMLElement).hidden = verify;
   ($('#auth-alt') as HTMLElement).hidden = recover;
-  ($('#team-field') as HTMLElement).hidden = !signup;
+  ($('#team-field') as HTMLElement).hidden = !signup || invited;
   if (verify) ($('#auth-code') as HTMLInputElement).focus();
-  ($('#auth-team') as HTMLInputElement).required = signup;
+  ($('#auth-team') as HTMLInputElement).required = signup && !invited;
   ($('#auth-password') as HTMLInputElement).autocomplete = signup || recover ? 'new-password' : 'current-password';
 }
 
@@ -206,7 +211,7 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
       // error. It is the code step, not a failure.
       if (error && /retrieve user session/i.test(error.message)) {
         rememberTeamName(teamName);
-        askForCode(email, password, `We sent a 6-digit code to ${email}. It expires in fifteen minutes.`);
+        askForCode(email, password, `We sent a 6-digit code to ${email}. It expires in ten minutes.`);
         return;
       }
       if (error) {
@@ -227,7 +232,7 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
         // The project requires a confirmed address, so there is no session to
         // create a team with yet: the code step signs in, and the team is
         // made on that first sign-in.
-        askForCode(email, password, `We sent a 6-digit code to ${email}. It expires in fifteen minutes.`);
+        askForCode(email, password, `We sent a 6-digit code to ${email}. It expires in ten minutes.`);
         return;
       }
       await createTeam(teamName || `${email.split('@')[0]}'s team`);
@@ -1438,6 +1443,11 @@ function stashInvite(): void {
   if (!m) return;
   try { localStorage.setItem(PENDING_INVITE, m[1]); } catch { /* private mode */ }
   history.replaceState(null, '', `${location.pathname}#team`);
+}
+
+function invitePending(): boolean {
+  if (/^#join=/.test(location.hash)) return true;
+  try { return Boolean(localStorage.getItem(PENDING_INVITE)); } catch { return false; }
 }
 
 function takeInvite(): string | null {
