@@ -251,6 +251,33 @@ impl Cloud {
         Some(out)
     }
 
+    /// Check a Neon Auth webhook: a detached Ed25519 JWS over the timestamp
+    /// and the raw body, signed with the same keys as access tokens.
+    ///
+    /// The signing input is `header . b64(timestamp . b64(body))` — the body
+    /// is encoded twice, so `timestamp.body` alone never verifies. A delivery
+    /// more than five minutes from now either way is refused, so a captured
+    /// one cannot be replayed later.
+    pub async fn verify_webhook(&self, signature: &str, kid: &str, timestamp_ms: &str, body: &[u8]) -> bool {
+        let Some((h, s)) = signature.split_once("..") else { return false };
+        let Ok(ts) = timestamp_ms.parse::<u64>() else { return false };
+        let now_ms = now_secs() * 1000;
+        if ts.abs_diff(now_ms) > 5 * 60 * 1000 {
+            return false;
+        }
+        let Some(header) = B64.decode(h).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else {
+            return false;
+        };
+        if header.get("alg").and_then(|a| a.as_str()) != Some("EdDSA") {
+            return false;
+        }
+        let kid = header.get("kid").and_then(|k| k.as_str()).unwrap_or(kid);
+        let Some(key) = self.key(kid).await else { return false };
+        let Some(sig) = B64.decode(s).ok().and_then(|b| Signature::from_slice(&b).ok()) else { return false };
+        let inner = B64.encode(format!("{timestamp_ms}.{}", B64.encode(body)));
+        key.verify_strict(format!("{h}.{inner}").as_bytes(), &sig).is_ok()
+    }
+
     /// Read the person's own membership row. The Data API is handed the same
     /// token, so this is exactly what row-level security lets them see.
     async fn lookup(&self, access_token: &str, claims: &Claims) -> Option<Principal> {
@@ -482,6 +509,33 @@ mod tests {
         let addr = l.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
         format!("http://{addr}")
+    }
+
+    /// A webhook delivery signed the way Neon Auth signs one.
+    fn webhook_signature(key: &SigningKey, ts: &str, body: &[u8]) -> String {
+        let h = B64.encode(serde_json::json!({ "alg": "EdDSA", "kid": KID }).to_string());
+        let inner = B64.encode(format!("{ts}.{}", B64.encode(body)));
+        let sig = key.sign(format!("{h}.{inner}").as_bytes());
+        format!("{h}..{}", B64.encode(sig.to_bytes()))
+    }
+
+    #[tokio::test]
+    async fn a_webhook_verifies_only_as_signed_and_only_while_fresh() {
+        let base = stub(Seen::default()).await;
+        let cloud = Cloud::for_test(&base);
+        let body = br#"{"event_type":"send.otp","event_id":"e1"}"#;
+        let now = (now_secs() * 1000).to_string();
+        let sig = webhook_signature(&signing_key(), &now, body);
+        assert!(cloud.verify_webhook(&sig, KID, &now, body).await, "a genuine delivery");
+        assert!(!cloud.verify_webhook(&sig, KID, &now, br#"{"event_type":"send.otp","event_id":"e2"}"#).await, "another body");
+        let later = (now_secs() * 1000 + 1).to_string();
+        assert!(!cloud.verify_webhook(&sig, KID, &later, body).await, "another timestamp");
+        let stale = ((now_secs() - 600) * 1000).to_string();
+        let stale_sig = webhook_signature(&signing_key(), &stale, body);
+        assert!(!cloud.verify_webhook(&stale_sig, KID, &stale, body).await, "ten minutes old");
+        let forged = webhook_signature(&SigningKey::from_bytes(&[9u8; 32]), &now, body);
+        assert!(!cloud.verify_webhook(&forged, KID, &now, body).await, "another key");
+        assert!(!cloud.verify_webhook("", KID, &now, body).await, "no signature");
     }
 
     #[tokio::test]

@@ -645,6 +645,7 @@ fn routes(app: Arc<App>) -> Router {
         .route("/api/health", get(health_handler))
         .route("/api/mail/invite", axum::routing::post(mail_invite_handler))
         .route("/api/mail/welcome", axum::routing::post(mail_welcome_handler))
+        .route("/api/auth/webhook", axum::routing::post(auth_webhook_handler))
         .route("/api/terms", get(terms_handler))
         .route("/term/ws/:idx", get(term_ws_handler))
         .route("/api/repos", get(repos_handler))
@@ -890,6 +891,72 @@ async fn mail_welcome_handler(
         Err(e) => {
             eprintln!("knoot relay: welcome to {} not sent: {e}", id.member.email);
             (axum::http::StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": "not sent" }))).into_response()
+        }
+    }
+}
+
+/// Neon Auth's delivery webhook: sign-up codes, sign-in codes and reset
+/// links arrive here signed, and go out in knoot's own frame rather than
+/// Neon's stock template. Subscribing to `send.otp` / `send.magic_link`
+/// turns Neon's own sending off, so a refusal here is an email nobody gets:
+/// every failure is logged.
+///
+/// Only a delivery signed by this project's Neon Auth keys is acted on, and
+/// only to the address on the account it names; the text is fixed here.
+async fn auth_webhook_handler(
+    State(app): State<Arc<App>>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    let Some(mailer) = app.mailer.clone() else { return mail_off() };
+    let Some(cloud) = app.cloud.clone() else { return mail_off() };
+    let h = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !cloud.verify_webhook(h("x-neon-signature"), h("x-neon-signature-kid"), h("x-neon-timestamp"), &body).await {
+        eprintln!("knoot relay: auth webhook refused: signature did not verify");
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "bad signature" }))).into_response();
+    }
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "not json" }))).into_response();
+    };
+    let s = |path: &[&str]| {
+        let mut cur = &v;
+        for k in path {
+            cur = cur.get(*k)?;
+        }
+        cur.as_str().map(str::to_string)
+    };
+    let (Some(event), Some(id), Some(to)) = (s(&["event_type"]), s(&["event_id"]), s(&["user", "email"])) else {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "missing fields" }))).into_response();
+    };
+    let msg = match event.as_str() {
+        "send.otp" => {
+            let Some(code) = s(&["event_data", "otp_code"]) else {
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "no code" }))).into_response();
+            };
+            let kind = s(&["event_data", "otp_type"]).unwrap_or_default();
+            // Neon's codes last ten minutes, which is what the console says too.
+            let minutes = 10;
+            crate::mail::code_email(&to, &code, &kind, minutes)
+        }
+        "send.magic_link" => {
+            let Some(link) = s(&["event_data", "link_url"]).filter(|l| l.starts_with("https://")) else {
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "no link" }))).into_response();
+            };
+            let kind = s(&["event_data", "link_type"]).unwrap_or_default();
+            crate::mail::link_email(&to, &link, &kind)
+        }
+        // Subscribed to nothing else; acknowledged so Neon does not retry.
+        _ => {
+            eprintln!("knoot relay: auth webhook verified, {event} ignored");
+            return Json(serde_json::json!({ "success": true, "ignored": event })).into_response();
+        }
+    };
+    match mailer.send(&msg, &format!("neon:{id}")).await {
+        Ok(_) => Json(serde_json::json!({ "success": true })).into_response(),
+        Err(e) => {
+            eprintln!("knoot relay: {event} to {to} not sent: {e}");
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": "not sent" }))).into_response()
         }
     }
 }

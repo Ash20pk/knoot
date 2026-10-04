@@ -107,7 +107,7 @@ fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-/// The invitation's frame: black, green type, one column, the logo.
+/// The frame every message shares: black, green type, one column, the logo.
 /// Inline styles only, because mail clients ignore most of everything else.
 fn frame(heading: &str, body_html: &str) -> String {
     format!(
@@ -117,7 +117,7 @@ font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;font-size:15p
 <div style=\"font-weight:800;font-size:17px;color:#e6ffe9\"><span style=\"color:#00ff41\">&gt;</span> knoot</div>\
 <h1 style=\"margin:28px 0 14px;font-size:22px;color:#e6ffe9\">{}</h1>{}\
 <p style=\"margin-top:36px;padding-top:16px;border-top:1px solid #0f3a1a;color:#4fa463;font-size:12.5px\">\
-knoot: shared memory and coordination for your team's coding agents.</p></div></body></html>",
+knoot.dev: shared memory and coordination for your team's coding agents.</p></div></body></html>",
         esc(heading),
         body_html
     )
@@ -161,9 +161,65 @@ expect this, ignore it: nothing happens until it is accepted.</p>\
     Email { to: to.to_string(), subject, text, html, reply_to: Some(inviter.to_string()) }
 }
 
+/// What a one-time code is for, in Neon Auth's words, and how a message
+/// about it reads.
+fn code_purpose(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "sign-in" => ("Your knoot.dev sign-in code", "Enter this code to sign in to knoot.dev."),
+        "forget-password" => ("Your knoot.dev password reset code", "Enter this code to choose a new password for knoot.dev."),
+        _ => ("Confirm your email for knoot.dev", "Enter this code to confirm your address and finish creating your knoot.dev account."),
+    }
+}
+
+/// A one-time code Neon Auth issued and handed to the relay to deliver.
+/// `minutes` is how long it lasts, from the code's own expiry.
+pub fn code_email(to: &str, code: &str, kind: &str, minutes: u64) -> Email {
+    let (subject, ask) = code_purpose(kind);
+    let lasts = if minutes == 1 { "1 minute".to_string() } else { format!("{minutes} minutes") };
+    let text = format!(
+        "{ask}\n\n    {code}\n\nIt expires in {lasts}. If you did not ask for it, ignore this email: \
+         nothing happens without the code.\n"
+    );
+    let html = frame(
+        subject,
+        &format!(
+            "<p>{}</p>\
+<div style=\"margin:22px 0;padding:16px 18px;background:#031007;border:1px solid #0f3a1a;color:#00ff41;\
+font-size:30px;font-weight:800;letter-spacing:8px;text-shadow:0 0 10px rgba(0,255,65,.45)\">{}</div>\
+<p style=\"color:#7fcf93\">It expires in {}. If you did not ask for it, ignore this email: nothing happens without the code.</p>",
+            esc(ask),
+            esc(code),
+            esc(&lasts)
+        ),
+    );
+    Email { to: to.to_string(), subject: subject.to_string(), text, html, reply_to: None }
+}
+
+/// A sign-in, confirmation or reset link Neon Auth issued for the relay to
+/// deliver. The link is Neon's own, pointing back at this site.
+pub fn link_email(to: &str, link: &str, kind: &str) -> Email {
+    let (subject, ask, label) = match kind {
+        "sign-in" => ("Sign in to knoot.dev", "Follow this link to sign in to knoot.dev.", "Sign in"),
+        "forget-password" => ("Reset your knoot.dev password", "Follow this link to choose a new password for knoot.dev.", "Choose a new password"),
+        _ => ("Confirm your email for knoot.dev", "Follow this link to confirm your address for knoot.dev.", "Confirm my address"),
+    };
+    let text = format!("{ask}\n\n{link}\n\nIf you did not ask for it, ignore this email.\n");
+    let html = frame(
+        subject,
+        &format!(
+            "<p>{}</p>{}<p style=\"color:#7fcf93\">If you did not ask for it, ignore this email.</p>\
+<p style=\"color:#4fa463;font-size:12.5px;word-break:break-all\">{}</p>",
+            esc(ask),
+            button(link, label),
+            esc(link)
+        ),
+    );
+    Email { to: to.to_string(), subject: subject.to_string(), text, html, reply_to: None }
+}
+
 /// The first email after someone joins: a short note from Ash, the three
-/// commands, and an invitation to reply. Deliberately plain — no frame, no
-/// button, nothing a mail client would file under promotions.
+/// commands, and an invitation to reply. In the same frame as the invitation,
+/// but written as a person, not a notification.
 pub fn welcome_email(to: &str, team: &str, base: &str) -> Email {
     let relay = base.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1) + "/ws";
     let console = format!("{base}/app/");
@@ -171,44 +227,46 @@ pub fn welcome_email(to: &str, team: &str, base: &str) -> Email {
     let install = "curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh";
     let join = format!("knoot join <your device key> --relay {relay}");
     let init = format!("knoot init --relay {relay}");
-    let subject = "Welcome to knoot".to_string();
+    let subject = "Welcome to knoot.dev".to_string();
     let text = format!(
         "Hi,\n\n\
-         I'm Ash, I build knoot. You're in {team} now, so here's how to get your agents onto it.\n\n\
+         I'm Ash, I build knoot.dev. You're in {team} now, so here's how to get your agents onto it.\n\n\
          1. Install it:\n   {install}\n\n\
          2. On each machine, with a device key from the console ({console}):\n   {join}\n\n\
          3. In each repository:\n   {init}\n\n\
          Then `knoot status` tells you whether coordination is actually on. The docs cover the rest: {docs}\n\n\
          If anything is confusing or broken, just reply. This comes straight to me and I read every one.\n\n\
-         Ash\n"
+         Ash\n\
+         Founder, knoot.dev\n"
     );
-    let p = "margin:0 0 16px";
     let code = |c: &str| {
         format!(
-            "<pre style=\"margin:6px 0 18px;padding:10px 12px;background:#f4f4f2;border-radius:4px;\
-font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;white-space:pre-wrap;word-break:break-all\">{}</pre>",
+            "<div style=\"background:#031007;border:1px solid #0f3a1a;padding:10px 12px;margin:6px 0 16px;\
+color:#00ff41;font-size:13px;word-break:break-all\">{}</div>",
             esc(c)
         )
     };
-    let html = format!(
-        "<!doctype html><html><body style=\"margin:0;padding:0\">\
-<div style=\"max-width:560px;padding:24px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;\
-font-size:15px;line-height:1.6;color:#1a1a1a\">\
-<p style=\"{p}\">Hi,</p>\
-<p style=\"{p}\">I'm Ash, I build knoot. You're in <b>{team}</b> now, so here's how to get your agents onto it.</p>\
-<p style=\"margin:0\">1. Install it:</p>{install}\
-<p style=\"margin:0\">2. On each machine, with a device key from <a href=\"{console}\">the console</a>:</p>{join}\
-<p style=\"margin:0\">3. In each repository:</p>{init}\
-<p style=\"{p}\">Then <code>knoot status</code> tells you whether coordination is actually on. \
-<a href=\"{docs}\">The docs</a> cover the rest.</p>\
-<p style=\"{p}\">If anything is confusing or broken, just reply. This comes straight to me and I read every one.</p>\
-<p style=\"{p}\">Ash</p></div></body></html>",
-        team = esc(team),
-        install = code(install),
-        console = esc(&console),
-        join = code(&join),
-        init = code(&init),
-        docs = esc(&docs),
+    let step = |s: &str| format!("<p style=\"margin-bottom:0;color:#e6ffe9\">{s}</p>");
+    let html = frame(
+        &format!("You're in {team}"),
+        &format!(
+            "<p>Hi,</p>\
+<p>I'm Ash, I build knoot.dev. You're in <b style=\"color:#e6ffe9\">{team}</b> now, so here's how to get your agents onto it.</p>\
+{s1}{install}{s2}{join}{s3}{init}\
+<p>Then <code style=\"color:#00ff41\">knoot status</code> tells you whether coordination is actually on. \
+<a href=\"{docs}\" style=\"color:#00ff41\">The docs</a> cover the rest.</p>{button}\
+<p>If anything is confusing or broken, just reply. This comes straight to me and I read every one.</p>\
+<p style=\"margin-bottom:0;color:#e6ffe9\">Ash</p><p style=\"margin-top:0;color:#7fcf93\">Founder, knoot.dev</p>",
+            team = esc(team),
+            s1 = step("1. Install it"),
+            install = code(install),
+            s2 = step("2. On each machine, with a device key from the console"),
+            join = code(&join),
+            s3 = step("3. In each repository"),
+            init = code(&init),
+            docs = esc(&docs),
+            button = button(&console, "Open the console"),
+        ),
     );
     Email { to: to.to_string(), subject, text, html, reply_to: None }
 }
@@ -252,6 +310,25 @@ mod tests {
     fn a_team_name_cannot_inject_markup_into_the_welcome() {
         let e = welcome_email("p@x.test", "<img src=x>", "https://knoot.dev");
         assert!(!e.html.contains("<img"), "{}", e.html);
+    }
+
+    #[test]
+    fn a_code_email_says_what_the_code_is_for_and_when_it_lapses() {
+        let e = code_email("p@x.test", "348132", "email-verification", 10);
+        assert!(e.subject.contains("Confirm"), "{}", e.subject);
+        for body in [&e.text, &e.html] {
+            assert!(body.contains("348132") && body.contains("10 minutes"), "{body}");
+        }
+        assert!(e.html.contains("background:#000"), "in the knoot frame");
+        assert!(code_email("p@x.test", "1", "forget-password", 1).text.contains("1 minute."));
+        assert!(code_email("p@x.test", "1", "sign-in", 5).subject.contains("sign-in"));
+    }
+
+    #[test]
+    fn a_link_email_cannot_be_given_markup() {
+        let e = link_email("p@x.test", "https://knoot.dev/x?a=\"><script>", "forget-password");
+        assert!(!e.html.contains("<script>"), "{}", e.html);
+        assert!(e.subject.contains("Reset"));
     }
 
     /// A stand-in for Resend: records what was posted and answers with an id.
