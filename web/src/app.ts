@@ -201,6 +201,14 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
     }
     if (mode === 'signup') {
       const { data, error } = await sb.auth.signUp({ email, password });
+      // With confirmation required, Neon makes the account and sends the code
+      // but has no session to return, and the adapter reports that as an
+      // error. It is the code step, not a failure.
+      if (error && /retrieve user session/i.test(error.message)) {
+        rememberTeamName(teamName);
+        askForCode(email, password, `We sent a 6-digit code to ${email}. It expires in fifteen minutes.`);
+        return;
+      }
       if (error) {
         // The address is already an account, usually from an earlier attempt
         // that failed later on. Sign-in is what they want; put them there.
@@ -230,7 +238,7 @@ $('#auth-form')!.addEventListener('submit', async (ev) => {
       if (error) {
         // An account made before its address was confirmed: send a fresh code
         // and finish here rather than telling them to go and find an email.
-        if (/not verified|verify your email|email_not_verified/i.test(error.message)) {
+        if (/not verified|verify your email|verification required|email_not_verified/i.test(error.message)) {
           await sendEmailCode(email);
           askForCode(email, password, `${email} is not confirmed yet. We sent a new code.`);
           return;
