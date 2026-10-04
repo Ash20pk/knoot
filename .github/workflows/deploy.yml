@@ -1,0 +1,140 @@
+# Put a build on knoot.dev.
+#
+# Two ways in:
+#
+#   - called by `release` after every push to main, with the binary that same
+#     run built and tested — never a re-download of `nightly`, which a later
+#     push may already have moved;
+#   - run by hand (Actions → deploy → Run workflow) with a release tag, which
+#     is how to roll back: deploy `v0.1.0`, or any tag that is still published.
+#
+# The box is reached as `knoot-deploy`, a user whose only key is pinned to one
+# command, /usr/local/sbin/knoot-receive (deploy/receive.sh). It gets a bundle
+# on stdin — revision, binary, checksum, deploy files — checks it, snapshots
+# the database, runs provision.sh and rolls back if the checks fail. The key
+# cannot open a shell.
+#
+# Configuration, all on the `production` environment so only main can use it:
+#   secret   DEPLOY_SSH_KEY      private half of the knoot-deploy key
+#   secret   DEPLOY_KNOWN_HOSTS  the droplet's host key line(s), pinned
+#   variable DEPLOY_HOST         the droplet's address
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Empty when called from release; the run's own binary is used
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag to deploy (a version like v0.1.0, or nightly)
+        required: true
+        default: nightly
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://knoot.dev
+    # One deploy at a time, and never cancelled halfway: a provision cut off
+    # mid-run is the one state rollback cannot reason about. A newer queued
+    # deploy replaces an older queued one, which is what we want.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      RELEASE: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The deploy files of the revision being deployed, not of whatever
+          # main is now: a rollback to v0.1.0 brings v0.1.0's Caddyfile.
+          ref: ${{ inputs.release || github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve the revision
+        id: rev
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "deploying $(git log -1 --format='%h %s' "$sha")"
+
+      # Runs that finish out of order must not deploy out of order. If main
+      # has moved on, a newer run is behind this one and will deploy instead.
+      - name: Skip if superseded
+        id: current
+        if: inputs.release == ''
+        run: |
+          head=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$head" != "${{ steps.rev.outputs.sha }}" ]; then
+            echo "main is at ${head:0:7} now; ${GITHUB_SHA:0:7} is superseded, so not deploying it"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The binary this run built
+        if: inputs.release == '' && steps.current.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: knoot-x86_64-linux
+          path: bundle
+
+      - name: The binary from the release
+        if: inputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE" --pattern 'knoot-x86_64-linux*' --dir bundle
+
+      - name: Bundle
+        if: steps.current.outputs.skip != 'true'
+        run: |
+          cd bundle
+          sha256sum -c knoot-x86_64-linux.sha256
+          echo "${{ steps.rev.outputs.sha }}" > REVISION
+          mkdir deploy
+          cp ../deploy/provision.sh ../deploy/receive.sh ../deploy/Caddyfile ../deploy/knoot-relay.service deploy/
+          tar -czf ../bundle.tgz REVISION knoot-x86_64-linux knoot-x86_64-linux.sha256 deploy
+          ls -l ../bundle.tgz
+
+      - name: Deploy
+        if: steps.current.outputs.skip != 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ] || [ -z "$DEPLOY_HOST" ]; then
+            echo "::error::production environment is missing DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS or DEPLOY_HOST"
+            exit 1
+          fi
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 0600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # StrictHostKeyChecking=yes: an unknown host key is an attacker or a
+          # rebuilt droplet, and either way a person should look.
+          ssh_() { ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes \
+                       -o ServerAliveInterval=30 "knoot-deploy@$DEPLOY_HOST" "$@"; }
+          ssh_ status
+          ssh_ deploy < bundle.tgz
+          deployed=$(ssh_ status | sed -n 's/^revision: //p')
+          [ "$deployed" = "${{ steps.rev.outputs.sha }}" ] \
+            || { echo "::error::box reports $deployed, expected ${{ steps.rev.outputs.sha }}"; exit 1; }
+
+      # From outside, through DNS and TLS, the way users reach it.
+      - name: Smoke test
+        if: steps.current.outputs.skip != 'true'
+        run: |
+          check() { code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "$1"); echo "$code $1"; [ "$code" = "$2" ]; }
+          check https://knoot.dev/ 200
+          check https://knoot.dev/app/ 200
+          check https://knoot.dev/status 200
+          check https://relay.knoot.dev/api/repos 401
+          curl -sI https://knoot.dev/app/ | grep -qi '^content-security-policy:' \
+            || { echo "::error::/app/ lost its Content-Security-Policy header"; exit 1; }
+          echo "knoot.dev is serving ${{ steps.rev.outputs.sha }}"

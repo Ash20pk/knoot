@@ -47,13 +47,14 @@ knoot's own system, containers and components, grey for external systems.
 3. [Level 2 — Containers](#level-2--containers): the processes and stores that make it up
 4. [Level 3 — Components](#level-3--components): the modules inside each container, and what they do
 5. [Level 4 — Code](#level-4--code): the types and rules everything else is built on
-6. [Deployment](#deployment): a hosted relay, end to end
-7. [Operating a team](#operating-a-team)
-8. [Security model](#security-model)
-9. [CLI reference](#cli-reference)
-10. [Development](#development)
-11. [Known limitations](#known-limitations)
-12. [License](#license)
+6. [Deployment](#deployment): a hosted relay, end to end, and how a change reaches it
+7. [Self-hosting the relay](#self-hosting-the-relay): your own relay, in a container or on a VM
+8. [Operating a team](#operating-a-team)
+9. [Security model](#security-model)
+10. [CLI reference](#cli-reference)
+11. [Development](#development)
+12. [Known limitations](#known-limitations)
+13. [License](#license)
 
 ---
 
@@ -565,12 +566,82 @@ database), and Litestream replication off it, which turns itself on once
 runs `journal_mode=WAL`; a test asserts it, because against a rollback journal
 Litestream copies nothing and reports success.
 
-### Releases
+### Releases and deploys
 
-CI (`.github/workflows/release.yml`) builds the web app, runs the test suite on
-Linux and builds all three binaries on every push to `main`, publishing them as
-the moving `nightly` pre-release. A `v*` tag matching `Cargo.toml`'s version
-publishes a versioned release, which is what `install.sh` takes by default.
+Every push to `main` goes from commit to knoot.dev with no one touching the
+box:
+
+```
+checks ─┐
+web ────┴─ build ─ publish ─┬─ image   ghcr.io/ash20pk/knoot:nightly
+                            └─ deploy  knoot.dev
+```
+
+| Stage | What it does | Fails the run when |
+|---|---|---|
+| `checks` | clippy with warnings denied, shellcheck on the deploy scripts, actionlint on the workflows | any warning |
+| `web` | typechecks and builds the front end that is embedded in the binary | it does not typecheck |
+| `build` | the test suite on Linux, then Linux x86_64 (static musl) and macOS arm64 / x86_64 | a test fails, or the Linux binary is not static |
+| `publish` | moves the `nightly` pre-release to this commit | — |
+| `image` | the Linux binary in an otherwise empty container; started and probed before it is pushed | it does not refuse an untokened request and accept the token |
+| `deploy` | ships this run's own binary to the droplet, then checks the live site through DNS and TLS | the box's checks fail (it rolls back), or the live site does not answer |
+
+A `v*` tag matching `Cargo.toml`'s version runs the same chain, publishes a
+versioned release — what `install.sh` takes by default — and tags the image
+`X.Y.Z` and `latest`. It does not deploy: production follows `main`. Branches
+and pull requests get `checks`, `web` and the tests from `ci.yml`, and publish
+nothing.
+
+**How a deploy reaches the box.** The `deploy` job runs in the `production`
+environment, which only `main` may use. It bundles the revision, the binary
+*that run* built, its checksum and the `deploy/` files, and pipes the bundle
+over SSH to the `knoot-deploy` user. That user's one key is pinned to one
+command, `knoot-receive` ([`deploy/receive.sh`](deploy/receive.sh)), so it
+cannot open a shell, forward a port or copy a file. The receiver:
+
+1. refuses anything but the expected files, and a binary whose checksum does
+   not match;
+2. takes a `.backup` of `relay.db` (the last five are kept as
+   `/var/lib/knoot/pre-deploy-*.db`);
+3. installs the deploy files and runs `provision.sh` with the binary it was
+   handed — never a re-download of `nightly`, which a later push may already
+   have moved;
+4. if provisioning fails its checks, puts back the previous binary and deploy
+   files and provisions those again.
+
+The deploy files travelling with the binary is deliberate: `/root/deploy`
+used to change only when someone remembered to copy it up, so a redeploy could
+pair a new binary with an old Caddyfile. Two runs finishing out of order cannot
+deploy out of order either — a run whose commit is no longer the head of `main`
+skips its deploy, because a newer one is behind it.
+
+**Rolling back.** Actions → `deploy` → *Run workflow*, with any release tag
+that is still published (`v0.1.0`, or `nightly`). That revision's binary and its
+deploy files go out through the same receiver. What is live is one call away:
+
+```sh
+ssh knoot-deploy@<host> status   # with the deploy key: revision, binary version, relay state
+```
+
+**Setting it up again** (a new droplet, or a rotated key) takes the droplet's
+address as `DEPLOY_HOST`, the private half of a key as `DEPLOY_SSH_KEY` and the
+droplet's host key line as `DEPLOY_KNOWN_HOSTS`, all on the `production`
+environment. On the box, once, as root:
+
+```sh
+useradd --system --create-home --home-dir /var/lib/knoot-deploy --shell /bin/sh knoot-deploy
+passwd -l knoot-deploy
+install -d -o knoot-deploy -m 0700 /var/lib/knoot-deploy/.ssh
+echo 'restrict,command="sudo /usr/local/sbin/knoot-receive" ssh-ed25519 AAAA… knoot-ci-deploy' \
+  > /var/lib/knoot-deploy/.ssh/authorized_keys
+printf '%s\n' 'Defaults:knoot-deploy env_keep += "SSH_ORIGINAL_COMMAND"' \
+  'knoot-deploy ALL=(root) NOPASSWD: /usr/local/sbin/knoot-receive' > /etc/sudoers.d/knoot-deploy
+chmod 0440 /etc/sudoers.d/knoot-deploy && visudo -c
+```
+
+`provision.sh` installs `knoot-receive` itself. It also prints the operator
+token only to a terminal: from CI, whose logs are public on a public repository,
+it says where the token is instead.
 
 ### Configuration
 
@@ -604,6 +675,128 @@ Data API on its branch (`neon neon-auth enable`, `neon data-api create
 then `neon data-api refresh-schema`.
 
 ---
+
+## Self-hosting the relay
+
+The relay is the one shared piece, and nothing about it is specific to
+knoot.dev. Run your own when the team's paths, intents and facts should stay
+on infrastructure you control, or when agents work somewhere that cannot reach
+the internet. Code never reaches a relay either way; what does is listed in
+[What crosses the wire](#what-crosses-the-wire).
+
+It is one process with one SQLite file, and a 1 vCPU / 1 GB machine is
+plenty. It speaks plain HTTP and WebSocket on one port and leaves TLS to a
+proxy in front of it.
+
+### Option 1 — a container
+
+The image is the release's static Linux binary and an empty `/data`, nothing
+else: no shell, no package manager. It runs as an unprivileged user and keeps
+its database in the volume. `latest` is the newest release, `X.Y.Z` a pinned
+one, `nightly` the newest build of `main`; Linux x86_64 only.
+
+[`deploy/selfhost/`](deploy/selfhost) is a working setup with Caddy in front,
+which obtains and renews certificates by itself:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/Ash20pk/knoot/main/deploy/selfhost/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/Ash20pk/knoot/main/deploy/selfhost/Caddyfile
+printf 'RELAY_HOST=relay.example.com\nKNOOT_RELAY_TOKEN=%s\n' "$(openssl rand -hex 24)" > .env
+docker compose up -d
+```
+
+Point the DNS name at the host first, and keep `.env`: the token in it is the
+relay's root credential. Without `KNOOT_RELAY_TOKEN` the relay starts **open**
+and says so in its log; the compose file refuses to start without one.
+
+Behind a proxy you already run, the container alone is enough:
+
+```sh
+docker run -d --name knoot --restart unless-stopped \
+  -p 127.0.0.1:7420:7420 -v knoot:/data \
+  -e KNOOT_RELAY_TOKEN="$(openssl rand -hex 24)" \
+  ghcr.io/ash20pk/knoot:latest
+```
+
+Proxy `wss://relay.example.com` to `127.0.0.1:7420`. Caddy needs nothing
+special for WebSockets; nginx needs the usual `Upgrade` and `Connection`
+headers.
+
+### Option 2 — an Ubuntu VM
+
+[`deploy/provision.sh`](deploy/provision.sh) is what runs knoot.dev, and it
+takes your names:
+
+```sh
+scp -r deploy root@<host>:/root/
+ssh root@<host> 'DOMAIN=relay.example.com APEX=example.com bash /root/deploy/provision.sh'
+```
+
+It installs the binary under systemd with Caddy in front, a firewall, nightly
+on-box snapshots and — once `/etc/knoot/litestream.env` exists — continuous
+replication off the box. It is idempotent: re-run it to upgrade. The token is
+in `/etc/knoot/relay.env`. [Deployment](#deployment) says what each piece is
+for.
+
+### Option 3 — the binary, anywhere
+
+```sh
+KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) knoot relay --listen 127.0.0.1:7420 --db /var/lib/knoot/relay.db
+```
+
+Run it under whatever supervises processes where you are, behind whatever
+terminates TLS. Use `wss://` for anything that leaves the machine.
+
+### Your team on it
+
+Registering a team returns its owner's key. The owner then adds everyone else,
+each with a key of their own:
+
+```sh
+# 1. register. On the compose setup, from inside its network, because the proxy refuses it (see below):
+docker run --rm --network <project>_default curlimages/curl -s -X POST \
+  http://relay:7420/api/register -H 'content-type: application/json' \
+  -d '{"team":"acme","email":"you@example.com"}'
+#    anywhere else, the same POST to https://relay.example.com/api/register
+
+# 2. the owner stores their key, then adds people; each key is printed once
+knoot join <owner key> --relay wss://relay.example.com/ws
+knoot member add priya@example.com --label "priya laptop" --relay wss://relay.example.com/ws
+
+# 3. each teammate, once per machine
+knoot join <their key> --relay wss://relay.example.com/ws
+
+# 4. enrol a repository, and commit the files it writes
+knoot init --relay wss://relay.example.com/ws
+```
+
+**Close registration once your team exists.** It is open so that anyone can
+start a team on a public relay, and rate-limited per address. Teams cannot see
+each other, but on your own relay there is no reason to let strangers create
+them. The compose setup's Caddyfile already refuses `/api/register`; on another
+proxy, refuse that one path.
+
+**The console** at `/app` needs a Neon project before people can sign in; see
+[Configuration](#configuration). Without one, sign-in is off and nothing else
+changes: device keys, the CLI and every agent work the same.
+
+### Keeping it
+
+- **Upgrades.** `docker compose pull && docker compose up -d`, or re-run
+  `provision.sh`. The database is kept. A newer relay works with older daemons,
+  and an older relay with newer daemons: fields added to the protocol are
+  optional on both sides.
+- **Backups.** Snapshot with SQLite's online backup, never `cp`, which
+  half-copies a database in WAL mode:
+
+  ```sh
+  docker run --rm -v knoot:/data -v "$PWD":/out alpine \
+    sh -c 'apk add -q sqlite && sqlite3 /data/relay.db ".backup /out/relay-$(date +%F).db"'
+  ```
+
+  `provision.sh` does this nightly and keeps seven.
+- **Health.** `/status` is a live page; `/api/repos` answers `401` without the
+  token and `200` with it.
 
 ## Operating a team
 
@@ -646,15 +839,11 @@ no recovery path and nobody to ask. A **room** is an access group over areas;
 every team starts with one called `general` over every repository, so a small
 team never meets the word.
 
-### Self-hosting with a token
+### On your own relay
 
-```sh
-KNOOT_RELAY_TOKEN=$(openssl rand -hex 24) knoot relay --listen 0.0.0.0:7420
-knoot login --relay wss://relay.example.com/ws --token <token>   # each teammate, once
-```
-
-Use `wss://` off-machine; terminate TLS at a proxy. **A relay that refuses you
-still fails open**: a rejected token turns coordination off with one stderr
+Everything above works the same against a relay you run — see
+[Self-hosting the relay](#self-hosting-the-relay). **A relay that refuses you
+still fails open**: a rejected key turns coordination off with one stderr
 line, and every edit is allowed. An operator's mistake cannot become the
 team's outage.
 

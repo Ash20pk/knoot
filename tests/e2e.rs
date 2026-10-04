@@ -337,6 +337,10 @@ async fn messages_arrive_at_the_start_of_a_turn() {
         .env("KNOOT_USER", "priya")
         .env("USER", "testuser");
     assert!(cmd.status().unwrap().success(), "knoot msg must succeed");
+    // The message makes a round trip through the relay before it lands in
+    // ash's mailbox; asking in the same millisecond failed CI about one run
+    // in thirty.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     let out = hook_as(&sock, json!({
         "hook_event_name": "UserPromptSubmit", "session_id": "sessA",

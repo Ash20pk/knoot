@@ -46,9 +46,14 @@ until they are moved over.
 
 ## Deploy
 
-The droplet runs from `/root/deploy`, a copy that only changes when someone
-copies it up. After changing anything in `deploy/`, fetch the new file onto
-the server from `raw.githubusercontent.com/Ash20pk/knoot/main/deploy/...`
-before re-running the provisioner, or the old Caddyfile and unit are
-reinstalled. Verify with `curl -sI https://knoot.dev/app/` for headers and
-`systemctl show knoot-relay -p EnvironmentFiles` for the unit.
+A push to `main` deploys itself: `release.yml` builds, publishes `nightly`
+and calls `deploy.yml`, which pipes that run's binary and the `deploy/` files
+to `knoot-receive` on the droplet (`deploy/receive.sh`). The deploy files
+travel with the binary, so `/root/deploy` is replaced on every deploy rather
+than going stale. Do not deploy by hand; to roll back, run the `deploy`
+workflow with a release tag. A change under `deploy/` reaches the box on the
+next push to `main` like any other.
+
+Watch the run's `deploy` job, then verify with `curl -sI https://knoot.dev/app/`
+for headers and `systemctl show knoot-relay -p EnvironmentFiles` for the unit.
+`ssh knoot-deploy@<host> status` (deploy key only) prints the live revision.

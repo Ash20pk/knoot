@@ -6,7 +6,9 @@
 # Idempotent: re-run it to deploy a new revision. Env overrides:
 #   DOMAIN=relay.knoot.dev     hostname agents enrol against
 #   APEX=knoot.dev             hostname serving the site and console
-#   SOURCE=release|build       download the CI binary (default) or compile here
+#   SOURCE=release|build|file  download the CI binary (default), compile here,
+#                              or install BINARY — what CI deploys hand over
+#   BINARY=/path/to/knoot      the binary to install, when SOURCE=file
 #   REF=main                   revision, when SOURCE=build
 #   REPO=https://github.com/Ash20pk/knoot.git
 set -euo pipefail
@@ -29,7 +31,13 @@ apt-get install -y -qq git curl ca-certificates sqlite3 \
 	debian-keyring debian-archive-keyring apt-transport-https
 
 if ! command -v caddy >/dev/null; then
-	say "caddy"
+	# The receiving end of CI deploys. Installed whether or not CI is set up: it
+# does nothing until a key in ~knoot-deploy/.ssh/authorized_keys calls it.
+if [[ -f "$HERE/receive.sh" ]]; then
+	install -m 0755 "$HERE/receive.sh" /usr/local/sbin/knoot-receive
+fi
+
+say "caddy"
 	curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
 		| gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 	curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
@@ -44,7 +52,15 @@ fi
 # memory with the relay it is replacing. `SOURCE=build` is kept for hacking on
 # the box, or if the release is ever unavailable.
 # ---------------------------------------------------------------------------
-if [[ "$SOURCE" == "release" ]]; then
+if [[ "$SOURCE" == "file" ]]; then
+	# A CI deploy brings the exact binary its own run built and checked, so a
+	# push landing mid-deploy cannot swap a newer `nightly` in underneath it.
+	say "binary (handed over: ${BINARY:-unset})"
+	[[ -n "${BINARY:-}" && -f "$BINARY" ]] || { echo "SOURCE=file needs BINARY=<path>" >&2; exit 1; }
+	chmod 0755 "$BINARY"
+	"$BINARY" --version
+	install -m 0755 "$BINARY" /usr/local/bin/knoot.new
+elif [[ "$SOURCE" == "release" ]]; then
 	say "binary (prebuilt, from CI)"
 	tmp="$(mktemp -d)"
 	curl -fsSL -o "$tmp/knoot" "$RELEASE_URL/knoot-x86_64-linux"
@@ -284,6 +300,10 @@ systemctl daemon-reload
 systemctl enable --quiet knoot-relay knoot-snapshot.timer
 # Swap the binary in only now that everything around it is in place, so a
 # failed download or a bad checksum leaves the running version untouched.
+# The one it replaces is kept: a deploy that fails its checks rolls back to it.
+if [[ -x /usr/local/bin/knoot ]]; then
+	cp -p /usr/local/bin/knoot /usr/local/bin/knoot.prev
+fi
 mv /usr/local/bin/knoot.new /usr/local/bin/knoot
 systemctl restart knoot-relay
 systemctl start knoot-snapshot.timer
@@ -357,6 +377,14 @@ for host in "$DOMAIN" "$APEX"; do
 		|| echo "[warn] https://$host returned '$code' — DNS may not point here yet; Caddy retries on its own"
 done
 
+# The token is the relay's root credential. A terminal gets it; anything else
+# — a CI log, which on a public repository is public — gets told where it is.
+if [[ -t 1 ]]; then
+	token_line="operator token: $TOKEN"
+else
+	token_line="operator token: in /etc/knoot/relay.env (not printed: output is not a terminal)"
+fi
+
 cat <<OUT
 
 relay is up.
@@ -366,7 +394,7 @@ relay is up.
   enroll a repo:  knoot init --relay wss://$DOMAIN/ws
   each teammate:  knoot login --relay wss://$DOMAIN/ws --token <team token from the console>
 
-  operator token: $TOKEN
+  $token_line
   logs:           journalctl -u knoot-relay -f
   snapshots:      /var/lib/knoot/snapshots
   redeploy:       bash $HERE/provision.sh

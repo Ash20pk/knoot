@@ -1,0 +1,36 @@
+# A self-hosted knoot relay behind Caddy, which gets and renews TLS
+# certificates on its own. See "Self-hosting the relay" in the README.
+#
+#   1. point a DNS name at this host and put it in .env:  RELAY_HOST=relay.example.com
+#   2. and a token:  echo "KNOOT_RELAY_TOKEN=$(openssl rand -hex 24)" >> .env
+#   3. docker compose up -d
+#
+# Agents then enrol with:  knoot init --relay wss://relay.example.com/ws
+services:
+  relay:
+    image: ghcr.io/ash20pk/knoot:${KNOOT_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      # Required. Without it the relay starts open — and says so in its log.
+      KNOOT_RELAY_TOKEN: ${KNOOT_RELAY_TOKEN:?set KNOOT_RELAY_TOKEN in .env}
+    volumes:
+      - knoot:/data
+    # No ports: only Caddy reaches it.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RELAY_HOST: ${RELAY_HOST:?set RELAY_HOST in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    depends_on:
+      - relay
+
+volumes:
+  knoot:
+  caddy:

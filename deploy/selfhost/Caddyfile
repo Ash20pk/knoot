@@ -1,0 +1,12 @@
+{$RELAY_HOST} {
+	encode zstd gzip
+
+	# Registration is open so anyone can start a team on a public relay. On
+	# your own, create your team first, then leave this in place so nobody
+	# else can. Remove it (and reload) to register another.
+	@register path /api/register
+	respond @register "registration is closed on this relay" 403
+
+	# Websockets need nothing special: Caddy upgrades them by itself.
+	reverse_proxy relay:7420
+}

@@ -1,0 +1,31 @@
+# Fast checks every change has to pass, shared by `ci` (branches and pull
+# requests) and `release` (main and tags, where they gate the build).
+#
+# No `cargo fmt --check`: the tree has never been rustfmt-formatted, and a
+# check that fails on every file says nothing about the change in front of it.
+name: checks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      # The deploy scripts run as root on the production box. A quoting slip
+      # there is an outage, so they are held to shellcheck's warnings.
+      - name: Shellcheck the deploy scripts
+        run: shellcheck -S warning deploy/*.sh install.sh
+      - name: Lint the workflows
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color

@@ -9,6 +9,15 @@
 # caring which glibc the host shipped. macOS gets one build per architecture,
 # because a laptop is where most agents actually run and `cargo install` was
 # the only way onto one.
+#
+# The whole pipeline, on a push to main:
+#
+#   checks ─┐
+#   web ────┴─ build (test on Linux; 3 targets) ─ publish (nightly) ─┬─ image  (ghcr :nightly)
+#                                                                    └─ deploy (knoot.dev)
+#
+# A `v*` tag runs the same chain, publishes a versioned release and image, and
+# does not deploy: production follows main.
 name: release
 
 on:
@@ -23,6 +32,9 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
   # The web front end is embedded into every binary, so it is built once and
   # handed to each platform job. Building it here also means a broken front
   # end — or one that no longer typechecks — fails the release rather than
@@ -56,7 +68,7 @@ jobs:
           if-no-files-found: error
 
   build:
-    needs: web
+    needs: [checks, web]
     strategy:
       fail-fast: false
       matrix:
@@ -145,6 +157,11 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # Two pushes close together must not publish out of order, or `nightly`
+    # could end up naming the older commit.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -177,3 +194,59 @@ jobs:
             --title "nightly ($(git rev-parse --short "$GITHUB_SHA"))" \
             --notes "Builds of $(git rev-parse --short "$GITHUB_SHA") for Linux x86_64 (static), macOS Apple silicon and macOS Intel: $(git log -1 --format=%s "$GITHUB_SHA")" \
             out/*
+
+  # The relay as a container, for teams that host their own. The same binary
+  # the release carries, in an image with nothing else in it.
+  image:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: knoot-x86_64-linux
+          path: ctx
+      - name: Build
+        run: |
+          cp deploy/Dockerfile ctx/
+          (cd ctx && sha256sum -c knoot-x86_64-linux.sha256)
+          image="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tags="$image:${GITHUB_REF_NAME#v} $image:latest"
+          else
+            tags="$image:nightly $image:sha-${GITHUB_SHA:0:7}"
+          fi
+          args=""
+          for t in $tags; do args="$args -t $t"; done
+          # shellcheck disable=SC2086
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.licenses=MIT OR Apache-2.0" \
+            $args ctx
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "TAGS=$tags" >> "$GITHUB_ENV"
+      # Before anything is pushed: the image starts, refuses an untokened
+      # request and accepts the token, as a self-hoster would first try it.
+      - name: Smoke test
+        run: |
+          # shellcheck disable=SC2086 # TAGS is a space-separated list by design
+          set -- $TAGS
+          docker run -d --name relay -p 127.0.0.1:7420:7420 -e KNOOT_RELAY_TOKEN=smoke "$1"
+          for _ in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:7420/ && break; sleep 1; done
+          docker logs relay
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7420/api/repos)" = 401 ]
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer smoke' http://127.0.0.1:7420/api/repos)" = 200 ]
+      - name: Push
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for t in $TAGS; do docker push "$t"; done
+
+  deploy:
+    needs: publish
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
