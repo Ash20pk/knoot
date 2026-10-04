@@ -1,0 +1,63 @@
+# Rotate knoot.dev's operator token: Actions → rotate-token → Run workflow.
+#
+# `start` issues a new token and keeps the old one working for the grace
+# period, after which the box drops it by itself; `finish` drops it now;
+# `status` says whether a rotation is in progress. Team and device keys are
+# not derived from the operator token and keep working throughout — see
+# deploy/rotate-token.sh for what the token is and is not.
+#
+# The new token never appears here: the logs of a public repository are
+# public. Read it on the box, from /etc/knoot/relay.env.
+name: rotate-token
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [start, finish, status]
+        default: start
+      grace_hours:
+        description: How long the old token keeps working (start only)
+        type: number
+        default: 24
+
+permissions:
+  contents: read
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://knoot.dev
+    # Shares the deploy lock: a rotation restarts the relay, and so does a deploy.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Rotate
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          ACTION: ${{ inputs.action }}
+          GRACE: ${{ inputs.grace_hours }}
+        run: |
+          case "$ACTION" in
+            start) [[ $GRACE =~ ^[0-9]{1,3}$ ]] || { echo "::error::grace_hours must be whole hours"; exit 1; }
+                   cmd="rotate-token $GRACE" ;;
+            finish) cmd="finish-rotation" ;;
+            status) cmd="status" ;;
+            *) echo "::error::unknown action $ACTION"; exit 1 ;;
+          esac
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 0600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes "knoot-deploy@$DEPLOY_HOST" "$cmd"
+
+      - name: The site still answers
+        run: |
+          curl -fsS -m 20 https://knoot.dev/api/health | grep -q '"status":"ok"'
+          [ "$(curl -s -o /dev/null -m 20 -w '%{http_code}' https://relay.knoot.dev/api/repos)" = 401 ]

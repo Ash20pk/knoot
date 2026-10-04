@@ -36,6 +36,9 @@ if ! command -v caddy >/dev/null; then
 if [[ -f "$HERE/receive.sh" ]]; then
 	install -m 0755 "$HERE/receive.sh" /usr/local/sbin/knoot-receive
 fi
+if [[ -f "$HERE/rotate-token.sh" ]]; then
+	install -m 0755 "$HERE/rotate-token.sh" /usr/local/sbin/knoot-rotate-token
+fi
 
 say "caddy"
 	curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key \

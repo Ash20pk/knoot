@@ -9,8 +9,12 @@
 # What it asked for arrives in SSH_ORIGINAL_COMMAND, kept across sudo by
 # /etc/sudoers.d/knoot-deploy:
 #
-#   status   print the revision deployed and the binary's version
-#   deploy   read a bundle on stdin and roll it out
+#   status            print the revision deployed, the binary's version and
+#                     whether an operator token rotation is in progress
+#   deploy            read a bundle on stdin and roll it out
+#   rotate-token [H]  rotate the operator token; the old one works H more
+#                     hours (default 24). See deploy/rotate-token.sh.
+#   finish-rotation   stop accepting the old operator token now
 #
 # The bundle is a gzipped tar of exactly these files, and nothing else:
 #
@@ -27,7 +31,7 @@ STATE=/var/lib/knoot
 DEPLOY_DIR=/root/deploy
 MAX_BYTES=$((64 * 1024 * 1024))
 KEEP_SNAPSHOTS=5
-ALLOWED='^(REVISION|knoot-x86_64-linux|knoot-x86_64-linux\.sha256|deploy/|deploy/(provision\.sh|receive\.sh|Caddyfile|knoot-relay\.service))$'
+ALLOWED='^(REVISION|knoot-x86_64-linux|knoot-x86_64-linux\.sha256|deploy/|deploy/(provision\.sh|receive\.sh|rotate-token\.sh|Caddyfile|knoot-relay\.service))$'
 
 [[ $EUID -eq 0 ]] || { echo "knoot-receive: must run as root (through sudo)" >&2; exit 1; }
 say() { printf '\n== %s\n' "$*"; }
@@ -36,6 +40,9 @@ status() {
 	echo "revision: $(cat "$STATE/DEPLOYED_REVISION" 2>/dev/null || echo unknown)"
 	echo "binary:   $(/usr/local/bin/knoot --version 2>/dev/null || echo missing)"
 	echo "relay:    $(systemctl is-active knoot-relay)"
+	if [[ -x /usr/local/sbin/knoot-rotate-token ]]; then
+		/usr/local/sbin/knoot-rotate-token status
+	fi
 }
 
 deploy() {
@@ -62,6 +69,8 @@ deploy() {
 
 	rev="$(tr -d '[:space:]' < "$work/b/REVISION")"
 	[[ $rev =~ ^[0-9a-f]{40}$ ]] || { echo "REVISION is not a commit sha" >&2; exit 1; }
+	# rotate-token.sh is optional: a rollback to a release older than it must
+	# still deploy.
 	for f in provision.sh receive.sh Caddyfile knoot-relay.service; do
 		[[ -f "$work/b/deploy/$f" ]] || { echo "bundle is missing deploy/$f" >&2; exit 1; }
 	done
@@ -90,6 +99,9 @@ deploy() {
 	rm -rf "${DEPLOY_DIR:?}"
 	install -d -m 0755 "$DEPLOY_DIR"
 	install -m 0755 "$work/b/deploy/provision.sh" "$work/b/deploy/receive.sh" "$DEPLOY_DIR/"
+	if [[ -f "$work/b/deploy/rotate-token.sh" ]]; then
+		install -m 0755 "$work/b/deploy/rotate-token.sh" "$DEPLOY_DIR/"
+	fi
 	install -m 0644 "$work/b/deploy/Caddyfile" "$work/b/deploy/knoot-relay.service" "$DEPLOY_DIR/"
 
 	say "provision ${rev:0:7}"
@@ -114,11 +126,20 @@ deploy() {
 	exit 1
 }
 
+# Matched whole, never split or evaluated: the only argument anywhere is a
+# grace period, and it must be digits.
 case "${SSH_ORIGINAL_COMMAND:-}" in
 	status) status ;;
 	deploy) deploy ;;
+	rotate-token) /usr/local/sbin/knoot-rotate-token start 24 ;;
+	"rotate-token "*)
+		hours="${SSH_ORIGINAL_COMMAND#rotate-token }"
+		[[ $hours =~ ^[0-9]{1,3}$ ]] || { echo "knoot-receive: grace must be whole hours" >&2; exit 2; }
+		/usr/local/sbin/knoot-rotate-token start "$hours"
+		;;
+	finish-rotation) /usr/local/sbin/knoot-rotate-token finish ;;
 	*)
-		echo "knoot-receive: expected 'status' or 'deploy', got '${SSH_ORIGINAL_COMMAND:-}'" >&2
+		echo "knoot-receive: expected status, deploy, rotate-token [hours] or finish-rotation, got '${SSH_ORIGINAL_COMMAND:-}'" >&2
 		exit 2
 		;;
 esac

@@ -653,6 +653,27 @@ chmod 0440 /etc/sudoers.d/knoot-deploy && visudo -c
 token only to a terminal: from CI, whose logs are public on a public repository,
 it says where the token is instead.
 
+**Rotating the operator token.** The operator token (`KNOOT_RELAY_TOKEN`) is
+the relay's original shared secret. It opens the built-in `root` identity and
+nothing else: team and device keys are stored as hashes of themselves, not
+derived from it, so rotating it leaves every user's key working. Only
+something configured with the operator token itself has to move, and rotation
+gives it time to:
+
+```sh
+knoot-rotate-token start 24   # on the box: new token now, the old one works 24h more
+knoot-rotate-token status
+knoot-rotate-token finish     # drop the old one early; it is dropped by itself at the end
+```
+
+or Actions → `rotate-token` → *Run workflow*, which does the same through the
+deploy key. During the grace period the relay accepts both
+(`KNOOT_RELAY_TOKEN_PREVIOUS`) and logs every use of the old one, so
+`journalctl -u knoot-relay | grep 'previous operator token'` lists whatever has
+not moved yet. Each step checks itself — new token accepted, old one accepted
+then refused, untokened refused — and a start that does not verify puts the old
+file back.
+
 ### Configuration
 
 Three places hold the Neon URLs. None of them is a secret: the browser signs
@@ -863,6 +884,11 @@ The hosted relay. `/` is the site, `/docs` the documentation, `/status` a live
 health check, `/app` the console: a **Get started** flow ticked from what the
 relay actually knows, then the live log, **Memory** (what the rooms know, who
 wrote it, whether it is stale) and **History** (`knoot why` in a browser).
+
+knoot.dev runs the `mls` key provider: facts are sealed on the laptops that
+write them and the relay stores only ciphertext, so neither it nor its operator
+can read them. The console's Memory view shows who wrote what and when, not
+the text. Its log is replicated continuously off the box.
 
 ---
 

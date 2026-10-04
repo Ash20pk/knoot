@@ -49,6 +49,10 @@ struct App {
     /// still works: it resolves to the built-in `root` team so an existing
     /// deployment keeps running across this upgrade.
     token: Option<String>,
+    /// The token being rotated out, accepted beside `token` for a grace period
+    /// so nothing that still holds it is cut off mid-rotation. Every use is
+    /// logged, which is how an operator finds what has not moved yet.
+    previous_token: Option<String>,
     /// Open registration needs a brake. Five teams per hour per address is
     /// generous for a human and useless for a script.
     reg_limit: crate::teams::RateLimit,
@@ -242,6 +246,7 @@ async fn prepare_with_token(
         db: Mutex::new(conn),
         terms: None,
         token,
+        previous_token: crate::config::env_or_legacy("KNOOT_RELAY_TOKEN_PREVIOUS"),
         reg_limit: crate::teams::RateLimit::new(5, 60 * 60 * 1000),
         cloud: crate::cloud::Cloud::from_env(),
         provider: key_provider_name(),
@@ -348,7 +353,12 @@ pub async fn run(listen: String, db_path: PathBuf, lab: Option<LabOpts>) -> Resu
     let shown = listen.replace("0.0.0.0", "127.0.0.1");
     eprintln!("knoot relay listening on ws://{listen}/ws (audit log: {})", db_path.display());
     match relay_token() {
-        Some(_) => eprintln!("  auth:      token required (KNOOT_RELAY_TOKEN)"),
+        Some(_) => {
+            eprintln!("  auth:      token required (KNOOT_RELAY_TOKEN)");
+            if crate::config::env_or_legacy("KNOOT_RELAY_TOKEN_PREVIOUS").is_some() {
+                eprintln!("  rotation:  the previous token is still accepted (KNOOT_RELAY_TOKEN_PREVIOUS)");
+            }
+        }
         None => {
             let loopback = listen.starts_with("127.0.0.1") || listen.starts_with("localhost");
             if loopback {
@@ -493,6 +503,14 @@ async fn identify(
     match (&app.token, tok.as_deref()) {
         // A configured secret, presented correctly.
         (Some(expected), Some(got)) if token_matches(expected, got) => {
+            Some(legacy_identity(app, "root"))
+        }
+        // The one being rotated out, inside its grace period.
+        (Some(_), Some(got)) if app.previous_token.as_deref().is_some_and(|p| token_matches(p, got)) => {
+            eprintln!(
+                "knoot relay: the previous operator token was used — whatever presented it must \
+                 move to the new one before the grace period ends"
+            );
             Some(legacy_identity(app, "root"))
         }
         // A configured secret, and this is not it.
@@ -2233,11 +2251,27 @@ mod auth_tests {
             db: Mutex::new(conn),
             terms: None,
             token: token.map(str::to_string),
+            previous_token: None,
             reg_limit: crate::teams::RateLimit::new(5, 60_000),
             cloud: None,
             provider: crate::proto::PROVIDER_PLAINTEXT.into(),
             mls_tx: broadcast::channel(16).0,
         }
+    }
+
+    #[tokio::test]
+    async fn the_previous_operator_token_works_only_while_it_is_being_rotated_out() {
+        let mut app = app_with(Some("new-secret"));
+        assert!(team_of(&app, &bearer("Bearer new-secret"), None).await.is_some(), "the new one works");
+        assert!(team_of(&app, &bearer("Bearer old-secret"), None).await.is_none(), "an unknown one does not");
+        app.previous_token = Some("old-secret".into());
+        assert_eq!(
+            team_of(&app, &bearer("Bearer old-secret"), None).await.as_deref(),
+            Some("root"),
+            "during the grace period the old one still opens the operator identity"
+        );
+        assert!(team_of(&app, &bearer("Bearer new-secret"), None).await.is_some(), "and the new one too");
+        assert!(team_of(&app, &bearer("Bearer guess"), None).await.is_none(), "but nothing else");
     }
 
     #[tokio::test]

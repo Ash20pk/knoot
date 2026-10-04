@@ -99,6 +99,8 @@ jobs:
           echo "${{ steps.rev.outputs.sha }}" > REVISION
           mkdir deploy
           cp ../deploy/provision.sh ../deploy/receive.sh ../deploy/Caddyfile ../deploy/knoot-relay.service deploy/
+          # Newer than the oldest releases a rollback might deploy.
+          if [ -f ../deploy/rotate-token.sh ]; then cp ../deploy/rotate-token.sh deploy/; fi
           tar -czf ../bundle.tgz REVISION knoot-x86_64-linux knoot-x86_64-linux.sha256 deploy
           ls -l ../bundle.tgz
 
