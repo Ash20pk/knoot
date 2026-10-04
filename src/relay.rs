@@ -2460,7 +2460,7 @@ mod auth_tests {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", l.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(l, fake).await.unwrap() });
-        let mailer = crate::mail::Mailer::new("re_x", "knoot <hello@knoot.dev>", &url, "https://knoot.dev");
+        let mailer = crate::mail::Mailer::new("re_x", "Ash from knoot <ash@knoot.dev>", &url, "https://knoot.dev");
 
         assert!(send_welcome_once(&app, &mailer, "m_1", "ash@acme.test", "acme").await.is_err(), "the provider failed");
         assert_eq!(send_welcome_once(&app, &mailer, "m_1", "ash@acme.test", "acme").await, Ok(true), "so the next call sends it");

@@ -24,13 +24,17 @@ pub struct Email {
     pub subject: String,
     pub text: String,
     pub html: String,
+    /// Where a reply goes, when not to the sender. An invitation sets it to
+    /// the admin who sent it: a question about joining is theirs to answer.
+    pub reply_to: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct Mailer {
     http: reqwest::Client,
     key: String,
-    /// `knoot <hello@knoot.dev>`: a verified sender on the Resend account.
+    /// `Ash from knoot <ash@knoot.dev>`: a verified sender on the Resend
+    /// account, and a real inbox, since the welcome asks people to reply.
     from: String,
     /// `https://api.resend.com`, or a test server.
     api: String,
@@ -42,7 +46,7 @@ impl Mailer {
     /// Configured from the environment, or `None` — and then no mail is sent.
     ///
     ///   RESEND_API_KEY   a sending key, restricted to the knoot domain
-    ///   KNOOT_MAIL_FROM  the sender, e.g. `knoot <hello@knoot.dev>`
+    ///   KNOOT_MAIL_FROM  the sender, e.g. `Ash from knoot <ash@knoot.dev>`
     ///   KNOOT_PUBLIC_URL where links point, e.g. `https://knoot.dev`
     pub fn from_env() -> Option<Self> {
         let key = crate::config::env_or_legacy("RESEND_API_KEY")?;
@@ -70,18 +74,22 @@ impl Mailer {
     /// invitation or welcome is one email, not two: Resend drops a repeat of
     /// a key it has seen in the last day.
     pub async fn send(&self, email: &Email, idempotency: &str) -> Result<String, String> {
+        let mut body = serde_json::json!({
+            "from": self.from,
+            "to": [email.to],
+            "subject": email.subject,
+            "text": email.text,
+            "html": email.html,
+        });
+        if let Some(r) = &email.reply_to {
+            body["reply_to"] = serde_json::json!([r]);
+        }
         let resp = self
             .http
             .post(format!("{}/emails", self.api))
             .bearer_auth(&self.key)
             .header("Idempotency-Key", idempotency)
-            .json(&serde_json::json!({
-                "from": self.from,
-                "to": [email.to],
-                "subject": email.subject,
-                "text": email.text,
-                "html": email.html,
-            }))
+            .json(&body)
             .send()
             .await
             .map_err(|e| format!("mail provider unreachable: {e}"))?;
@@ -99,7 +107,7 @@ fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-/// The frame every message shares: black, green type, one column, the logo.
+/// The invitation's frame: black, green type, one column, the logo.
 /// Inline styles only, because mail clients ignore most of everything else.
 fn frame(heading: &str, body_html: &str) -> String {
     format!(
@@ -150,49 +158,59 @@ expect this, ignore it: nothing happens until it is accepted.</p>\
             esc(link)
         ),
     );
-    Email { to: to.to_string(), subject, text, html }
+    Email { to: to.to_string(), subject, text, html, reply_to: Some(inviter.to_string()) }
 }
 
-/// The first email after someone joins: what to run, in order.
+/// The first email after someone joins: a short note from Ash, the three
+/// commands, and an invitation to reply. Deliberately plain — no frame, no
+/// button, nothing a mail client would file under promotions.
 pub fn welcome_email(to: &str, team: &str, base: &str) -> Email {
     let relay = base.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1) + "/ws";
     let console = format!("{base}/app/");
     let docs = format!("{base}/docs/");
-    let subject = format!("Welcome to knoot, {team} is ready");
+    let install = "curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh";
+    let join = format!("knoot join <your device key> --relay {relay}");
+    let init = format!("knoot init --relay {relay}");
+    let subject = "Welcome to knoot".to_string();
     let text = format!(
-        "You're in {team} on knoot.\n\n\
-         Three steps put your agents on it:\n\n\
-         1. Install:            curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh\n\
-         2. On each machine:    knoot join <your device key> --relay {relay}\n\
-                                (mint the key in the console: {console})\n\
-         3. In a repository:    knoot init --relay {relay}\n\n\
-         Then run `knoot status` — it says whether coordination is really on.\n\n\
-         Docs: {docs}\n"
+        "Hi,\n\n\
+         I'm Ash, I build knoot. You're in {team} now, so here's how to get your agents onto it.\n\n\
+         1. Install it:\n   {install}\n\n\
+         2. On each machine, with a device key from the console ({console}):\n   {join}\n\n\
+         3. In each repository:\n   {init}\n\n\
+         Then `knoot status` tells you whether coordination is actually on. The docs cover the rest: {docs}\n\n\
+         If anything is confusing or broken, just reply. This comes straight to me and I read every one.\n\n\
+         Ash\n"
     );
+    let p = "margin:0 0 16px";
     let code = |c: &str| {
         format!(
-            "<div style=\"background:#031007;border:1px solid #0f3a1a;padding:10px 12px;margin:6px 0 16px;\
-color:#00ff41;font-size:13px;word-break:break-all\">{}</div>",
+            "<pre style=\"margin:6px 0 18px;padding:10px 12px;background:#f4f4f2;border-radius:4px;\
+font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;white-space:pre-wrap;word-break:break-all\">{}</pre>",
             esc(c)
         )
     };
-    let html = frame(
-        &format!("{team} is ready"),
-        &format!(
-            "<p>Three steps put your agents on it.</p>\
-<p style=\"margin-bottom:0;color:#e6ffe9\">1. Install</p>{}\
-<p style=\"margin-bottom:0;color:#e6ffe9\">2. On each machine, with a device key from the console</p>{}\
-<p style=\"margin-bottom:0;color:#e6ffe9\">3. In a repository</p>{}\
-<p>Then <code style=\"color:#00ff41\">knoot status</code> says whether coordination is really on.</p>{}\
-<p style=\"color:#7fcf93\">The <a href=\"{}\" style=\"color:#00ff41\">docs</a> cover the rest.</p>",
-            code("curl -fsSL https://raw.githubusercontent.com/Ash20pk/knoot/main/install.sh | sh"),
-            code(&format!("knoot join <your device key> --relay {relay}")),
-            code(&format!("knoot init --relay {relay}")),
-            button(&console, "Open the console"),
-            esc(&docs)
-        ),
+    let html = format!(
+        "<!doctype html><html><body style=\"margin:0;padding:0\">\
+<div style=\"max-width:560px;padding:24px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;\
+font-size:15px;line-height:1.6;color:#1a1a1a\">\
+<p style=\"{p}\">Hi,</p>\
+<p style=\"{p}\">I'm Ash, I build knoot. You're in <b>{team}</b> now, so here's how to get your agents onto it.</p>\
+<p style=\"margin:0\">1. Install it:</p>{install}\
+<p style=\"margin:0\">2. On each machine, with a device key from <a href=\"{console}\">the console</a>:</p>{join}\
+<p style=\"margin:0\">3. In each repository:</p>{init}\
+<p style=\"{p}\">Then <code>knoot status</code> tells you whether coordination is actually on. \
+<a href=\"{docs}\">The docs</a> cover the rest.</p>\
+<p style=\"{p}\">If anything is confusing or broken, just reply. This comes straight to me and I read every one.</p>\
+<p style=\"{p}\">Ash</p></div></body></html>",
+        team = esc(team),
+        install = code(install),
+        console = esc(&console),
+        join = code(&join),
+        init = code(&init),
+        docs = esc(&docs),
     );
-    Email { to: to.to_string(), subject, text, html }
+    Email { to: to.to_string(), subject, text, html, reply_to: None }
 }
 
 #[cfg(test)]
@@ -209,6 +227,7 @@ mod tests {
             assert!(body.contains("priya@acme.test"), "only works for them: {body}");
             assert!(body.contains("seven days"), "{body}");
         }
+        assert_eq!(e.reply_to.as_deref(), Some("ash@acme.test"), "replies go to the inviter");
     }
 
     #[test]
@@ -225,6 +244,14 @@ mod tests {
         assert!(e.text.contains("knoot join <your device key> --relay wss://knoot.dev/ws"), "{}", e.text);
         assert!(e.text.contains("knoot init --relay wss://knoot.dev/ws"));
         assert!(e.html.contains("https://knoot.dev/app/"));
+        assert!(e.text.contains("just reply"), "a welcome invites a reply: {}", e.text);
+        assert_eq!(e.reply_to, None, "and the reply goes to the sender");
+    }
+
+    #[test]
+    fn a_team_name_cannot_inject_markup_into_the_welcome() {
+        let e = welcome_email("p@x.test", "<img src=x>", "https://knoot.dev");
+        assert!(!e.html.contains("<img"), "{}", e.html);
     }
 
     /// A stand-in for Resend: records what was posted and answers with an id.
@@ -253,14 +280,15 @@ mod tests {
     #[tokio::test]
     async fn a_message_goes_to_the_provider_as_the_configured_sender_with_its_key() {
         let (url, seen) = fake_resend().await;
-        let m = Mailer::new("re_test", "knoot <hello@knoot.dev>", &url, "https://knoot.dev");
+        let m = Mailer::new("re_test", "Ash from knoot <ash@knoot.dev>", &url, "https://knoot.dev");
         let id = m.send(&welcome_email("ash@acme.test", "acme", &m.public_url), "welcome:m_1").await.unwrap();
         assert_eq!(id, "em_123");
         let seen = seen.lock().unwrap();
         let (meta, body) = &seen[0];
         assert_eq!(meta, "welcome:m_1|Bearer re_test", "idempotency key and API key travel as headers");
-        assert_eq!(body["from"], "knoot <hello@knoot.dev>");
+        assert_eq!(body["from"], "Ash from knoot <ash@knoot.dev>");
         assert_eq!(body["to"][0], "ash@acme.test");
         assert!(body["html"].as_str().unwrap().contains("acme"));
+        assert!(body.get("reply_to").is_none(), "no reply_to unless the message sets one");
     }
 }
