@@ -85,6 +85,9 @@ deploy() {
 	cp -p /usr/local/bin/knoot "$work/rollback-knoot"
 	rm -rf "$DEPLOY_DIR.prev"
 	[[ -d $DEPLOY_DIR ]] && cp -a "$DEPLOY_DIR" "$DEPLOY_DIR.prev"
+	# Replaced, not merged into: a file dropped from deploy/ must not live on
+	# here, which is how the last relay's unit outlived its rename.
+	rm -rf "${DEPLOY_DIR:?}"
 	install -d -m 0755 "$DEPLOY_DIR"
 	install -m 0755 "$work/b/deploy/provision.sh" "$work/b/deploy/receive.sh" "$DEPLOY_DIR/"
 	install -m 0644 "$work/b/deploy/Caddyfile" "$work/b/deploy/knoot-relay.service" "$DEPLOY_DIR/"

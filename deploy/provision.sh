@@ -249,6 +249,9 @@ dbs:
         path: ${LITESTREAM_PATH:-knoot/relay.db}
         endpoint: ${LITESTREAM_ENDPOINT:-}
         region: ${LITESTREAM_REGION:-us-east-1}
+        # Most S3-compatible stores other than AWS (Neon's among them) want
+        # bucket-in-path URLs rather than bucket.host ones.
+        force-path-style: ${LITESTREAM_FORCE_PATH_STYLE:-false}
         # Ten seconds of loss on a total-loss event, and a full snapshot a day
         # so a restore never has to replay a month of WAL.
         sync-interval: 10s
@@ -287,6 +290,7 @@ else
      LITESTREAM_REGION=fra1
      LITESTREAM_ACCESS_KEY_ID=...
      LITESTREAM_SECRET_ACCESS_KEY=...
+     LITESTREAM_FORCE_PATH_STYLE=true   # for stores that need it, Neon's included
      EOF
      chmod 600 /etc/knoot/litestream.env
 
@@ -369,7 +373,21 @@ sudo -u knoot /usr/local/bin/knoot-snapshot \
 	|| echo "[warn] snapshot failed"
 
 if systemctl is-active --quiet litestream; then
-	echo "[ok  ] litestream replicating off-box"
+	# Running is not replicating: ask the replica for a snapshot. A warning
+	# rather than a failure, so an outage at the storage provider cannot roll
+	# back a good deploy — but a loud one, since the backup is what it costs.
+	replicated=""
+	for _ in $(seq 1 30); do
+		if litestream snapshots -config /etc/litestream.yml /var/lib/knoot/relay.db 2>/dev/null | tail -n +2 | grep -q .; then
+			replicated=yes; break
+		fi
+		sleep 2
+	done
+	if [[ -n $replicated ]]; then
+		echo "[ok  ] litestream replicating off-box ($(litestream snapshots -config /etc/litestream.yml /var/lib/knoot/relay.db 2>/dev/null | tail -n +2 | wc -l | tr -d ' ') snapshot(s) in the replica)"
+	else
+		echo "[warn] litestream is running but the replica has no snapshot — check: journalctl -u litestream"
+	fi
 else
 	echo "[warn] litestream is off — on-box snapshots only (see above)"
 fi

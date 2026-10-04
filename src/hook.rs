@@ -187,6 +187,7 @@ fn inner(agent: Option<Agent>) {
             repo_root,
             user: session_user(),
             already_continued: v["stop_hook_active"].as_bool().unwrap_or(false),
+            session: session.clone(),
         },
         _ => return,
     };
@@ -195,7 +196,14 @@ fn inner(agent: Option<Agent>) {
     // contract. It is kept so the one place it might matter is obvious.
     let _ = agent.label();
 
-    let Some(resp) = call_daemon(&req) else { return };
+    // A finish may wait for a file the session was refused (see the daemon's
+    // StopCheck), so it gets the time that wait needs. Every other hook is on
+    // an agent's hot path and keeps its short budget.
+    let budget = match req {
+        DReq::StopCheck { .. } => Duration::from_secs(crate::proto::STOP_WAIT_SECS + 5),
+        _ => Duration::from_millis(1_500),
+    };
+    let Some(resp) = call_daemon_at_within(&daemon::socket_path(), &req, budget) else { return };
 
     match (event, resp) {
         ("PreToolUse", DResp::Decision { allow: false, reason, notes }) => {
@@ -727,10 +735,15 @@ pub fn unreachable_hint() -> String {
 /// Talk to a daemon at an explicit socket path. Returns None on any failure —
 /// every caller treats None as "allow" (fail open).
 pub fn call_daemon_at(sock: &std::path::Path, req: &DReq) -> Option<DResp> {
-    let mut stream = UnixStream::connect(sock).ok()?;
     // Must exceed the daemon's own worst case (cold-start wait + claim timeout)
     // so we get its explicit fail-open verdict rather than timing out blind.
-    stream.set_read_timeout(Some(Duration::from_millis(1_500))).ok()?;
+    call_daemon_at_within(sock, req, Duration::from_millis(1_500))
+}
+
+/// `call_daemon_at` with an explicit read budget.
+pub fn call_daemon_at_within(sock: &std::path::Path, req: &DReq, budget: Duration) -> Option<DResp> {
+    let mut stream = UnixStream::connect(sock).ok()?;
+    stream.set_read_timeout(Some(budget)).ok()?;
     stream.set_write_timeout(Some(Duration::from_millis(200))).ok()?;
     let mut line = serde_json::to_string(req).ok()?;
     line.push('\n');

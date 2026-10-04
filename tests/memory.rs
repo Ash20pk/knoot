@@ -456,6 +456,37 @@ async fn a_colleagues_change_is_stale_on_a_machine_that_rebooted_and_has_not_pul
     );
 }
 
+/// Under a real key, the relay names people by email, and notes about the log
+/// are filed that way; a hook knows the person by $KNOOT_USER. Live, a
+/// release notice sat unread under `sam@…` while the Stop hook asked for
+/// `sam`'s mail, and the agent waiting for that file ended its run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_release_notice_reaches_the_stop_hook_under_a_keyed_identity() {
+    let (c, root, _) = repo("keyedstop").await;
+    std::fs::write(root.join("src/billing.js"), "x\n").unwrap();
+    joins(&c.sock, &root, "k-holder", "priya");
+    joins(&c.sock, &root, "k-waiter", "ash");
+    pre_write(&c.sock, &root, "k-holder", "priya", "src/billing.js");
+    let refused = pre_write(&c.sock, &root, "k-waiter", "ash", "src/billing.js");
+    assert!(refused.contains("src/billing.js"), "the waiter is refused first: {refused}");
+
+    let (sock, r2) = (c.sock.clone(), root.clone());
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        ends(&sock, &r2, "k-holder", "priya");
+    });
+    let out = hook_as(
+        &c.sock,
+        json!({ "hook_event_name": "Stop", "session_id": "k-waiter", "cwd": root.to_string_lossy(),
+                "stop_hook_active": false }),
+        "ash",
+    );
+    release.join().unwrap();
+    let out = out.expect("the release notice must reach the stop hook");
+    assert_eq!(out["decision"], "block", "{out}");
+    assert!(out["reason"].as_str().unwrap().contains("is free now"), "{out}");
+}
+
 /// MemClaw's second production bug, end to end: a near-duplicate filter that
 /// rejected a contradicting write. A contradiction *is* a near-duplicate, and
 /// the second statement must win without the first being lost.
@@ -1019,11 +1050,18 @@ async fn a_command_the_sandbox_refuses_is_queued_and_sent_by_the_next_hook() {
     assert!(listed.contains("integer cents, never floats"), "the fact was published:\n{listed}");
     assert!(listed.contains("rounding the tax line"), "the plan was published:\n{listed}");
 
-    // A peer in the area is told the plan and handed the message.
-    joins(&c.sock, &root, "s-ash", "ash");
+    // A peer in the area is told the plan and handed the message — at the
+    // first hook that can carry it, which is now the session's start, and
+    // exactly once.
+    let start = told(&hook_as(
+        &c.sock,
+        json!({ "hook_event_name": "SessionStart", "session_id": "s-ash", "cwd": root.to_string_lossy() }),
+        "ash",
+    ));
     let ctx = prompt(&c.sock, &root, "s-ash", "ash", "touch billing");
     assert!(ctx.contains("rounding the tax line"), "the plan reaches a peer:\n{ctx}");
-    assert!(ctx.contains("billing is mine for a bit"), "and the message:\n{ctx}");
+    let both = format!("{start}\n{ctx}");
+    assert_eq!(both.matches("billing is mine for a bit").count(), 1, "and the message, once:\n{both}");
 
     // With no daemon at all nothing is queued: there would be nobody to send it.
     let said = remember(&root.join("nowhere.sock"), &root, &["--name", "x", "nothing"]);

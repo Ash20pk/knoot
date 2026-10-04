@@ -1,6 +1,6 @@
 [package]
 name = "knoot"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Shared memory and live awareness for a team's coding agents — facts that reach the next agent unasked and are flagged when their files change."
 license = "MIT OR Apache-2.0"

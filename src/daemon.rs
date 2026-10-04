@@ -278,7 +278,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                         ts: now_ms(),
                     },
                 });
-                return deny(&path, &c, hub, queued, notes);
+                return deny(&path, &c, &user_of(&rc, &session), hub, queued, notes);
             }
 
             // Acquire through the relay (authoritative), fail open on timeout.
@@ -325,7 +325,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                     // which may predate whatever the holder is doing now. We
                     // have their session record, so prefer it.
                     let c = rc.view.lock().unwrap().claim_with_live_intent(&c);
-                    deny(&path, &c, hub, queued, notes)
+                    deny(&path, &c, &user_of(&rc, &sess_for_warn), hub, queued, notes)
                 }
                 Ok(Ok(ServerMsg::ClaimResp { granted: true, lease_until, hub, .. })) => {
                     rc.pending.lock().unwrap().remove(&id);
@@ -414,7 +414,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             if let Some((path, c, hub, queued)) = hit {
                 report_denied(&rc, &session, &path, &c);
                 notes.truncate(MAX_NOTES);
-                return deny(&path, &c, hub, queued, notes);
+                return deny(&path, &c, &user_of(&rc, &session), hub, queued, notes);
             }
 
             // Claimed the way a shell command's targets are: locally, on the
@@ -496,14 +496,14 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
         DReq::SessionStart { repo_root, session, user, branch, agent_pid } => {
             let Some(rc) = ensure_repo(d, &repo_root).await else { return DResp::Ok };
             track_agent(d, &repo_root, &session, agent_pid).await;
-            let ev = Event::SessionStarted { session: session.clone(), user, branch, ts: now_ms() };
+            let ev = Event::SessionStarted { session: session.clone(), user: user.clone(), branch, ts: now_ms() };
             rc.view.lock().unwrap().apply(&ev);
             let _ = rc.tx.send(ClientMsg::Append { event: ev });
             // Give the relay a beat to deliver the Welcome snapshot on fresh connections.
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             let since = now_ms().saturating_sub(FIRST_TURN_LOOKBACK_MS);
             d.turns.lock().unwrap().insert((repo_root.clone(), session.clone()), now_ms());
-            let mail = drain_mail(&rc, &user_of(&rc, &session));
+            let mail = drain_mail_for(&rc, &[&user, &known_user_of(&rc, &session)], false);
             let memory = memory_lines(&rc, &repo_root, &[]);
             let cached = cache_lines(&rc, &repo_root, &[]);
             let context = context_lines(&rc, &session);
@@ -555,7 +555,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                 .unwrap()
                 .insert(key, now)
                 .unwrap_or_else(|| now.saturating_sub(FIRST_TURN_LOOKBACK_MS));
-            let mail = drain_mail(&rc, &user);
+            let mail = drain_mail_for(&rc, &[&user, &known_user_of(&rc, &session)], false);
             // Before the view lock: both of these take it themselves, and the
             // brief is not worth a deadlock.
             let touched = session_paths(&rc, &session);
@@ -635,7 +635,7 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
                 if let Some((c, hub, queued)) = hit {
                     report_denied(&rc, &session, &path, &c);
                     notes.truncate(MAX_NOTES);
-                    return deny_bash(&path, &c, raw, hub, queued, notes);
+                    return deny_bash(&path, &c, &user_of(&rc, &session), raw, hub, queued, notes);
                 }
             }
             // Claim them, so peers are blocked while this command runs.
@@ -800,9 +800,10 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             let Some(rc) = ensure_repo(d, &repo_root).await else {
                 return DResp::Mail { items: vec![] };
             };
-            DResp::Mail { items: drain_mail(&rc, &user) }
+            // The CLI has no session, but this daemon's key names the person.
+            DResp::Mail { items: drain_mail_for(&rc, &[&user], true) }
         }
-        DReq::StopCheck { repo_root, user, already_continued } => {
+        DReq::StopCheck { repo_root, user, already_continued, session } => {
             let Some(rc) = ensure_repo(d, &repo_root).await else {
                 return DResp::Mail { items: vec![] };
             };
@@ -821,7 +822,34 @@ async fn handle_req(req: DReq, d: &Arc<Daemon>) -> DResp {
             if holds >= 3 {
                 return DResp::Mail { items: vec![] };
             }
-            DResp::Mail { items: drain_mail(&rc, &user) }
+            let me = known_user_of(&rc, &session);
+            let mail = drain_mail_for(&rc, &[&user, &me], false);
+            if !mail.is_empty() || already_continued || session.is_empty() {
+                return DResp::Mail { items: mail };
+            }
+            // A session that was refused a file and is now trying to finish has
+            // usually given up on it. In an interactive session someone is
+            // there to say "carry on" when it frees; a headless one simply
+            // ends, minutes or seconds early. So it waits — once per finish,
+            // and only while it is still a waiter — for the release, and is
+            // handed it as mail if it comes.
+            let waiting = || rc.view.lock().unwrap().waiters.iter().any(|w| w.session == session);
+            if !waiting() {
+                return DResp::Mail { items: vec![] };
+            }
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_secs(crate::proto::STOP_WAIT_SECS);
+            while std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let mail = drain_mail_for(&rc, &[&user, &me], false);
+                if !mail.is_empty() {
+                    return DResp::Mail { items: mail };
+                }
+                if !waiting() {
+                    break;
+                }
+            }
+            DResp::Mail { items: drain_mail_for(&rc, &[&user, &me], false) }
         }
         DReq::Remember { repo_root, session, user, name, text, paths, from } => {
             let Some(rc) = ensure_repo(d, &repo_root).await else {
@@ -2062,6 +2090,38 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
+/// Every name one person's mail can be filed under. Notes about the log are
+/// filed under the identity the relay stamps on events — the key's email —
+/// while `knoot msg sam` files under what the sender typed, and hooks know the
+/// person by $KNOOT_USER. Reading only one of them is how a release notice
+/// once sat unread while the agent it was for stopped.
+fn mail_keys(rc: &Arc<RepoConn>, names: &[&str], with_key_owner: bool) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    let mut add = |name: &str| {
+        for k in [Some(name), name.split_once('@').map(|(local, _)| local)].into_iter().flatten() {
+            let k = k.trim().to_lowercase();
+            if !k.is_empty() && !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+    };
+    for n in names {
+        add(n);
+    }
+    // Only for the CLI: a daemon that several sessions share under one key
+    // (a lab, a test) must not hand one session another's mail.
+    if with_key_owner {
+        if let Some(me) = rc.me.lock().unwrap().as_ref() {
+            add(&me.email);
+        }
+    }
+    keys
+}
+
+fn drain_mail_for(rc: &Arc<RepoConn>, names: &[&str], with_key_owner: bool) -> Vec<String> {
+    mail_keys(rc, names, with_key_owner).iter().flat_map(|k| drain_mail(rc, k)).collect()
+}
+
 fn drain_mail(rc: &Arc<RepoConn>, user: &str) -> Vec<String> {
     rc.mail
         .lock()
@@ -2102,6 +2162,13 @@ fn report_denied(rc: &Arc<RepoConn>, session: &str, path: &str, c: &Claim) {
             ts: now_ms(),
         },
     });
+}
+
+/// The person behind a session as the view knows it, or nothing — no
+/// fallback to the OS user, which for mail would hand one person's notes to
+/// whoever shares a login name with them.
+fn known_user_of(rc: &Arc<RepoConn>, session: &str) -> String {
+    rc.view.lock().unwrap().sessions.get(session).map(|s| s.user.clone()).unwrap_or_default()
 }
 
 fn user_of(rc: &Arc<RepoConn>, session: &str) -> String {
@@ -2293,8 +2360,8 @@ fn changed_paths(before: &str, after: &str) -> Vec<String> {
     out
 }
 
-fn deny_bash(path: &str, c: &Claim, raw: &str, hub: bool, queued: usize, notes: Vec<String>) -> DResp {
-    let (base, notes) = match deny(path, c, hub, queued, notes) {
+fn deny_bash(path: &str, c: &Claim, me: &str, raw: &str, hub: bool, queued: usize, notes: Vec<String>) -> DResp {
+    let (base, notes) = match deny(path, c, me, hub, queued, notes) {
         DResp::Decision { reason: Some(r), notes, .. } => (r, notes),
         other => return other,
     };
@@ -2308,7 +2375,11 @@ fn deny_bash(path: &str, c: &Claim, raw: &str, hub: bool, queued: usize, notes: 
     }
 }
 
-fn deny(path: &str, c: &Claim, hub: bool, queued: usize, notes: Vec<String>) -> DResp {
+/// `me` is who is asking. When it is also who holds the file — a second agent
+/// of the same person, on the same key — "claimed by priya" tells priya's
+/// agent nothing it can act on: live, one waited on "priya" and messaged
+/// itself. So that case says what it is.
+fn deny(path: &str, c: &Claim, me: &str, hub: bool, queued: usize, notes: Vec<String>) -> DResp {
     // Rounded *up*: "expires in ~1m" for a two-minute hub lease read as a
     // contradiction of the "~2m" in the queue line right after it, and for a
     // ten-minute lease it was a minute pessimistic all day.
@@ -2330,6 +2401,23 @@ fn deny(path: &str, c: &Claim, hub: bool, queued: usize, notes: Vec<String>) -> 
     } else {
         String::new()
     };
+    if !me.is_empty() && c.user == me {
+        return DResp::Decision {
+            allow: false,
+            reason: Some(format!(
+                "knoot: `{path}` is held by another of your own sessions (session {}…, also {}) — intent: {}. \
+                 Lease expires in ~{}m.{queue} It is not a teammate: messaging {} reaches you, not that session. \
+                 Do not edit this file now: work on something else, or wait — you will be told automatically \
+                 when it is released, which happens as soon as that session ends or its process exits.",
+                &c.session[..c.session.len().min(8)],
+                c.user,
+                intent,
+                mins.max(1),
+                c.user,
+            )),
+            notes,
+        };
+    }
     DResp::Decision {
         allow: false,
         reason: Some(format!(

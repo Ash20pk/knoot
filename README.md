@@ -562,9 +562,19 @@ checksum, and swaps it in only once everything around it is in place.
 **Not losing the log.** Two layers, because they fail differently: nightly
 `sqlite3 .backup` snapshots on the box (never `cp`, which half-copies a WAL
 database), and Litestream replication off it, which turns itself on once
-`/etc/knoot/litestream.env` exists and says loudly while it is off. The relay
-runs `journal_mode=WAL`; a test asserts it, because against a rollback journal
-Litestream copies nothing and reports success.
+`/etc/knoot/litestream.env` exists and says loudly while it is off. Any
+S3-compatible store works; set `LITESTREAM_FORCE_PATH_STYLE=true` for the many
+that want bucket-in-path URLs, Neon's Object Storage among them. A deploy
+checks that the replica actually holds a snapshot, not just that Litestream is
+running. The relay runs `journal_mode=WAL`; a test asserts it, because against
+a rollback journal Litestream copies nothing and reports success.
+
+**Knowing it is down.** `/api/health` is the relay's own answer: up, its event
+log answering, its version and uptime, and nothing about any team. The status
+page shows it, and `.github/workflows/uptime.yml` asks it — and whether the
+websocket answers — every five minutes from outside. A failure opens an
+`outage` issue, which GitHub emails to whoever watches the repository; recovery
+closes it.
 
 ### Releases and deploys
 

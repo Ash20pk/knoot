@@ -11,6 +11,9 @@ pub fn now_ms() -> Ts {
 }
 
 pub const LEASE_MS: u64 = 10 * 60 * 1000; // 10 min, renewed on activity
+/// How long a session that was refused a file may wait for it when it tries
+/// to finish. Inside Claude Code's 60 s hook budget and Codex's 600 s.
+pub const STOP_WAIT_SECS: u64 = 40;
 /// A session with no activity for this long is treated as gone. This must be
 /// far longer than a human pause: a session idle at its prompt is alive, and
 /// pruning it destroys identity for the rest of the run. Claims are made safe
@@ -1005,7 +1008,15 @@ pub enum DReq {
     Poll { repo_root: String, user: String },
     /// The agent is trying to finish its turn. Pending mail is a reason to
     /// keep going, so this answers with anything undelivered.
-    StopCheck { repo_root: String, user: String, already_continued: bool },
+    /// `session` lets a session that was refused a file wait a moment for it
+    /// before finishing. Optional on the wire, as every added field is.
+    StopCheck {
+        repo_root: String,
+        user: String,
+        already_continued: bool,
+        #[serde(default)]
+        session: String,
+    },
     /// A Bash command about to run: parse it for write targets and gate them.
     BashPre { repo_root: String, session: String, command: String },
     /// A Bash command that finished: diff the working tree if it was audited.

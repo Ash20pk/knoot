@@ -501,6 +501,72 @@ async fn a_message_left_in_the_outbox_is_sent_on_the_next_hook() {
     assert!(reason.contains("ash"), "from the sender, not the hook:\n{reason}");
 }
 
+/// A headless agent refused a file ends its turn, and with it the run, even
+/// when the file frees seconds later. Live, two sessions stopped short of their
+/// commit this way. Trying to finish while waiting on a file now waits for it,
+/// and the release arrives as a reason to carry on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_waiting_on_a_file_is_handed_it_when_it_tries_to_stop() {
+    let (sock, root, _) = scenario("stopwait").await;
+    seed(&root, "src/a.rs");
+    joins(&sock, &root, "cx-holder", "priya");
+    joins(&sock, &root, "cx-waiter", "ash");
+    hook_as(&sock, patch(&root, "cx-holder", "PreToolUse", &update(&["src/a.rs"])), "priya");
+    let out = hook_as(&sock, patch(&root, "cx-waiter", "PreToolUse", &update(&["src/a.rs"])), "ash");
+    assert!(denied(&out), "the waiter is refused first");
+
+    // The holder finishes three seconds after the waiter tries to stop.
+    let (s2, r2) = (sock.clone(), root.clone());
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        hook_as(&s2, envelope(&r2, "cx-holder", "SessionEnd"), "priya");
+    });
+    let t0 = std::time::Instant::now();
+    let mut stop = envelope(&root, "cx-waiter", "Stop");
+    stop["stop_hook_active"] = json!(false);
+    let out = hook_as(&sock, stop, "ash").expect("the release must keep the session going");
+    release.join().unwrap();
+    assert_eq!(out["decision"], "block", "{out}");
+    assert!(out["reason"].as_str().unwrap().contains("src/a.rs` is free now"), "{out}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(20), "handed over when freed, not at the deadline");
+}
+
+/// A session that is not waiting on anything finishes as fast as it did.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_waiting_on_nothing_stops_without_delay() {
+    let (sock, root, _) = scenario("stopfast").await;
+    joins(&sock, &root, "cx-free", "ash");
+    let t0 = std::time::Instant::now();
+    let mut stop = envelope(&root, "cx-free", "Stop");
+    stop["stop_hook_active"] = json!(false);
+    let out = hook_as(&sock, stop, "ash");
+    assert!(out.is_none(), "nothing to say: {out:?}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(2), "took {:?}", t0.elapsed());
+}
+
+/// Two agents of one person on one file: the refusal says the holder is one
+/// of their own sessions, rather than naming them as if they were a teammate.
+/// Live, the old wording had an agent wait on, and message, itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_file_held_by_your_own_other_session_says_so() {
+    let (sock, root, _) = scenario("selfheld").await;
+    seed(&root, "src/a.rs");
+    joins(&sock, &root, "cx-one", "priya");
+    joins(&sock, &root, "cx-two", "priya");
+    hook_as(&sock, patch(&root, "cx-one", "PreToolUse", &update(&["src/a.rs"])), "priya");
+    let out = hook_as(&sock, patch(&root, "cx-two", "PreToolUse", &update(&["src/a.rs"])), "priya");
+    assert!(denied(&out), "still refused: two sessions do not share a claim");
+    let why = told(&out);
+    assert!(why.contains("another of your own sessions"), "{why}");
+    assert!(!why.contains("To coordinate directly, run: knoot msg"), "no advice to message yourself:\n{why}");
+
+    // A teammate still gets the teammate wording.
+    joins(&sock, &root, "cx-ash", "ash");
+    let out = hook_as(&sock, patch(&root, "cx-ash", "PreToolUse", &update(&["src/a.rs"])), "ash");
+    let why = told(&out);
+    assert!(why.contains("is currently claimed by priya"), "{why}");
+}
+
 /// Codex fires hooks concurrently, and every one of them flushes the outbox.
 /// Live, a message sent once landed on the log three times. Whoever moves
 /// the file sends it; the rest find nothing.

@@ -1,0 +1,82 @@
+# Is knoot.dev up? Asked every five minutes, from outside, through DNS and TLS.
+#
+# Down means an open issue labelled `outage`, which GitHub emails to whoever
+# watches the repository; recovery comments on it and closes it. One issue per
+# outage, however long it lasts. The status page answers the same question for
+# anyone who looks; this is for when nobody is looking.
+#
+# GitHub runs schedules late under load and turns them off in a repository
+# with no activity for sixty days. Both are fine for a project that pushes; an
+# outage found five or ten minutes late is still found.
+name: uptime
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the relay
+        id: probe
+        run: |
+          # Three tries, twenty seconds apart: a single slow answer is not an
+          # outage, and paging someone for one teaches them to ignore pages.
+          for attempt in 1 2 3; do
+            body=$(curl -s -m 15 https://knoot.dev/api/health || true)
+            ws=$(curl -s -o /dev/null -m 15 -w '%{http_code}' --http1.1 \
+              -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+              -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://relay.knoot.dev/ws || true)
+            echo "attempt $attempt: health=${body:-no answer} websocket=$ws"
+            # The websocket refuses an untokened client — 401 — and that refusal
+            # is what proves it is listening.
+            if [[ $body == *'"status":"ok"'* && ( $ws == 101 || $ws == 401 ) ]]; then
+              echo "up=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            [ "$attempt" = 3 ] || sleep 20
+          done
+          echo "up=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "detail<<EOF"
+            echo "health: ${body:-no answer}"
+            echo "websocket: $ws"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or close the outage issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          UP: ${{ steps.probe.outputs.up }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+        run: |
+          gh label create outage --color B60205 --description "knoot.dev is down" 2>/dev/null || true
+          open=$(gh issue list --label outage --state open --json number --jq '.[0].number // empty')
+          now=$(date -u +%FT%TZ)
+          if [ "$UP" = true ]; then
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "Back up at $now: /api/health reports ok and the websocket answers."
+              gh issue close "$open"
+            fi
+            exit 0
+          fi
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Still down at $now. [run]($run)"
+          else
+            gh issue create --label outage --title "knoot.dev is down" --body "$(printf '%s\n\n%s\n\n%s\n\n%s' \
+              "First failed check at $now, after three tries twenty seconds apart. [run]($run)" \
+              '```' "$DETAIL" '```')"
+          fi
+          exit 1
